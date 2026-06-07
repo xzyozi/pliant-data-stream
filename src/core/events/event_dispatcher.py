@@ -1,7 +1,7 @@
-import logging
-import traceback
 from collections import defaultdict
 from collections.abc import Callable
+import logging
+import traceback
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -12,6 +12,7 @@ class EventDispatcher:
     集中型イベントディスパッチャ。
     イベントの購読と発行を管理します。
     """
+
     def __init__(self) -> None:
         self._listeners: dict[str, list[Callable[..., None]]] = defaultdict(list)
 
@@ -49,6 +50,6 @@ class EventDispatcher:
             try:
                 listener(*args, **kwargs)
             except Exception:
-                logger.error(
-                    f"Error dispatching event {event_type} to listener {getattr(listener, '__name__', str(listener))}: {traceback.format_exc()}"
-                )
+                listener_name = getattr(listener, "__name__", str(listener))
+                tb = traceback.format_exc()
+                logger.error(f"Error dispatching event {event_type} to listener {listener_name}: {tb}")

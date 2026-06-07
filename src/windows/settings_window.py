@@ -7,12 +7,13 @@ SettingsManager.get_settings_schema() が返す list[SettingField] を唯一の�
 タブ・グループ・ウィジェットを自動生成する。
 特定アプリの設定項目はこのモジュールに一切含まれない。
 """
+
 from __future__ import annotations
 
+from collections import defaultdict
 import copy
 import logging
 import tkinter as tk
-from collections import defaultdict
 from tkinter import filedialog, font, messagebox, simpledialog, ttk
 from typing import TYPE_CHECKING, Any
 
@@ -43,10 +44,8 @@ class SettingsWindow(tk.Toplevel):
     ) -> None:
         super().__init__(master)
         self.app = app_instance
-        if hasattr(app_instance, "theme_manager") and hasattr(
-            app_instance.theme_manager, "apply_theme_to_toplevel"
-        ):
-            app_instance.theme_manager.apply_theme_to_toplevel(self)  # type: ignore
+        if hasattr(app_instance, "theme_manager") and hasattr(app_instance.theme_manager, "apply_theme_to_toplevel"):
+            app_instance.theme_manager.apply_theme_to_toplevel(self)
 
         self.title("Settings")
         self.geometry(config.SETTINGS_WINDOW_GEOMETRY)
@@ -133,15 +132,11 @@ class SettingsWindow(tk.Toplevel):
             self._tab_frames[tab_name] = frame
             self._render_tab(frame, tab_groups[tab_name])
 
-    def _render_tab(
-        self, parent: ttk.Frame, groups: dict[str, list[SettingField]]
-    ) -> None:
+    def _render_tab(self, parent: ttk.Frame, groups: dict[str, list[SettingField]]) -> None:
         """タブ内のグループ（LabelFrame）とウィジェットを描画する。"""
         for group_name, fields in groups.items():
             if group_name:
-                container: tk.Widget = ttk.LabelFrame(
-                    parent, text=group_name, padding=config.FRAME_PADDING
-                )
+                container: tk.Widget = ttk.LabelFrame(parent, text=group_name, padding=config.FRAME_PADDING)
                 container.pack(
                     fill=tk.X,
                     pady=config.BUTTON_PADDING_Y,
@@ -160,15 +155,18 @@ class SettingsWindow(tk.Toplevel):
         if f.widget_type == WidgetType.CHECKBUTTON:
             cb = ttk.Checkbutton(parent, text=f.label, variable=self._vars[f.key])
             cb.grid(
-                row=row, column=0, columnspan=2, sticky=tk.W,
-                padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y,
+                row=row,
+                column=0,
+                columnspan=2,
+                sticky=tk.W,
+                padx=config.BUTTON_PADDING_X,
+                pady=config.BUTTON_PADDING_Y,
             )
             return row + 1
 
         elif f.widget_type == WidgetType.SPINBOX:
             lbl = ttk.Label(parent, text=f"{f.label}:")
-            lbl.grid(row=row, column=0, sticky=tk.W,
-                     padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
+            lbl.grid(row=row, column=0, sticky=tk.W, padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
             sp = ttk.Spinbox(
                 parent,
                 from_=f.min_value,
@@ -177,38 +175,31 @@ class SettingsWindow(tk.Toplevel):
                 textvariable=self._vars[f.key],
                 width=f.width,
             )
-            sp.grid(row=row, column=1, sticky=tk.W,
-                    padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
+            sp.grid(row=row, column=1, sticky=tk.W, padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
             return row + 1
 
         elif f.widget_type == WidgetType.OPTION_MENU:
             lbl = ttk.Label(parent, text=f"{f.label}:")
-            lbl.grid(row=row, column=0, sticky=tk.W,
-                     padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
+            lbl.grid(row=row, column=0, sticky=tk.W, padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
             var = self._vars[f.key]
             menu = ttk.OptionMenu(parent, var, var.get(), *f.choices)  # type: ignore[arg-type]
-            menu.grid(row=row, column=1, sticky=tk.W,
-                      padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
+            menu.grid(row=row, column=1, sticky=tk.W, padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
             return row + 1
 
         elif f.widget_type == WidgetType.FONT_PICKER:
             lbl = ttk.Label(parent, text=f"{f.label}:")
-            lbl.grid(row=row, column=0, sticky=tk.W,
-                     padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
+            lbl.grid(row=row, column=0, sticky=tk.W, padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
             font_families = sorted(font.families())
             var = self._vars[f.key]
             menu = ttk.OptionMenu(parent, var, var.get(), *font_families)  # type: ignore[arg-type]
-            menu.grid(row=row, column=1, sticky=tk.W,
-                      padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
+            menu.grid(row=row, column=1, sticky=tk.W, padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
             return row + 1
 
         elif f.widget_type == WidgetType.ENTRY:
             lbl = ttk.Label(parent, text=f"{f.label}:")
-            lbl.grid(row=row, column=0, sticky=tk.W,
-                     padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
+            lbl.grid(row=row, column=0, sticky=tk.W, padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
             entry = ttk.Entry(parent, textvariable=self._vars[f.key], width=f.width)
-            entry.grid(row=row, column=1, sticky=tk.EW,
-                       padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
+            entry.grid(row=row, column=1, sticky=tk.EW, padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
             return row + 1
 
         elif f.widget_type == WidgetType.LISTBOX_EDIT:
@@ -221,8 +212,7 @@ class SettingsWindow(tk.Toplevel):
     def _render_listbox_edit(self, parent: tk.Widget, f: SettingField) -> None:
         """LISTBOX_EDIT 型: Listbox + Add/Remove ボタンを描画する。"""
         wrapper = ttk.Frame(parent)
-        wrapper.pack(fill=tk.BOTH, expand=True,
-                     padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
+        wrapper.pack(fill=tk.BOTH, expand=True, padx=config.BUTTON_PADDING_X, pady=config.BUTTON_PADDING_Y)
 
         listbox = tk.Listbox(wrapper)
         for item in self._list_vars[f.key]:
@@ -233,40 +223,41 @@ class SettingsWindow(tk.Toplevel):
         btn_frame = ttk.Frame(wrapper)
         btn_frame.pack(side=tk.LEFT, padx=(10, 0))
 
+        def add_item() -> None:
+            self._add_list_item(f.key)
+
+        def remove_item() -> None:
+            self._remove_list_item(f.key)
+
         ttk.Button(
-            btn_frame, text="Add",
-            command=lambda key=f.key: self._add_list_item(key),
+            btn_frame,
+            text="Add",
+            command=add_item,
         ).pack(fill=tk.X, pady=config.BUTTON_PADDING_Y)
 
         ttk.Button(
-            btn_frame, text="Remove",
-            command=lambda key=f.key: self._remove_list_item(key),
+            btn_frame,
+            text="Remove",
+            command=remove_item,
         ).pack(fill=tk.X, pady=config.BUTTON_PADDING_Y)
 
     def _build_action_buttons(self) -> None:
         """Import / Export / Restore Defaults / Save / Cancel / Apply ボタンを構築する。"""
         # Import / Export / Restore Defaults
         io_frame = ttk.Frame(self)
-        io_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=config.BUTTON_PADDING_Y,
-                      padx=config.BUTTON_PADDING_X)
+        io_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=config.BUTTON_PADDING_Y, padx=config.BUTTON_PADDING_X)
 
-        ttk.Button(io_frame, text="Export Settings", command=self._export_settings).pack(
-            side=tk.LEFT
-        )
+        ttk.Button(io_frame, text="Export Settings", command=self._export_settings).pack(side=tk.LEFT)
         ttk.Button(io_frame, text="Import Settings", command=self._import_settings).pack(
             side=tk.LEFT, padx=config.BUTTON_PADDING_X
         )
-        ttk.Button(io_frame, text="Restore Defaults", command=self._restore_defaults).pack(
-            side=tk.LEFT
-        )
+        ttk.Button(io_frame, text="Restore Defaults", command=self._restore_defaults).pack(side=tk.LEFT)
 
         # Save / Cancel / Apply
         btn_frame = ttk.Frame(self, padding=config.FRAME_PADDING)
         btn_frame.pack(fill=tk.X, side=tk.BOTTOM)
 
-        ttk.Button(btn_frame, text="Save", command=self._save_and_close).pack(
-            side=tk.RIGHT, padx=(10, 0)
-        )
+        ttk.Button(btn_frame, text="Save", command=self._save_and_close).pack(side=tk.RIGHT, padx=(10, 0))
         ttk.Button(btn_frame, text="Cancel", command=self.destroy).pack(side=tk.RIGHT)
         ttk.Button(btn_frame, text="Apply", command=self._apply_only).pack(side=tk.RIGHT)
 
@@ -275,9 +266,7 @@ class SettingsWindow(tk.Toplevel):
     # ------------------------------------------------------------------
 
     def _add_list_item(self, key: str) -> None:
-        new_item: str | None = simpledialog.askstring(
-            "Add Item", f"Enter value for '{key}':", parent=self
-        )
+        new_item: str | None = simpledialog.askstring("Add Item", f"Enter value for '{key}':", parent=self)
         if new_item and new_item not in self._list_vars[key]:
             self._list_vars[key].append(new_item)
             self._listbox_widgets[key].insert(tk.END, new_item)
@@ -356,9 +345,7 @@ class SettingsWindow(tk.Toplevel):
                 return True
             else:
                 logger.error("Could not load settings from: %s", filepath)
-                messagebox.showerror(
-                    "Import Failed", "Could not load settings from the selected file."
-                )
+                messagebox.showerror("Import Failed", "Could not load settings from the selected file.")
         return False
 
     def _restore_defaults(self) -> None:

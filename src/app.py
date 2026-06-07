@@ -1,9 +1,8 @@
+from collections.abc import Callable
 import logging
 import tkinter as tk
-from collections.abc import Callable
-from typing import Any
 
-from core.bootstrap.base_application import BaseApplication, ApplicationState
+from core.bootstrap.base_application import ApplicationState, BaseApplication
 from core.config.app_settings_manager import AppSettingsManager
 from core.events.event_dispatcher import EventDispatcher
 from theme_manager import ThemeManager
@@ -30,7 +29,7 @@ TRANSLATIONS = {
         "settings": "Settings",
         "error": "Error",
         "success": "Success",
-    }
+    },
 }
 
 
@@ -59,10 +58,12 @@ class PliantApplication(BaseApplication):
     @property
     def translator(self) -> Callable[[str], str]:
         """多言語対応用の翻訳関数を返します。"""
+
         def translate(key: str) -> str:
             lang = self._settings_manager.get_setting("language", "ja")
             lang_dict = TRANSLATIONS.get(lang, TRANSLATIONS["ja"])
             return lang_dict.get(key, key)
+
         return translate
 
     @property

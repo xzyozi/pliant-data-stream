@@ -1,8 +1,8 @@
+from datetime import datetime
 import logging
 import os
 import threading
 import tkinter as tk
-from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable
 
@@ -104,10 +104,7 @@ class MainWindow(ttk.Frame):
 
         # ヘッダーチェックボックス
         ttk.Checkbutton(
-            files_frame,
-            text="1行目をヘッダーとして扱う",
-            variable=self.has_header_var,
-            command=self._on_header_toggled
+            files_frame, text="1行目をヘッダーとして扱う", variable=self.has_header_var, command=self._on_header_toggled
         ).grid(row=1, column=1, sticky=tk.W, pady=2)
 
         # 出力ファイル
@@ -123,7 +120,11 @@ class MainWindow(ttk.Frame):
             fmt_frame, text="CSV/TSV", value="CSV", variable=self.output_format_var, command=self._on_format_changed
         ).pack(side=tk.LEFT, padx=5)
         ttk.Radiobutton(
-            fmt_frame, text="SQLite (Database)", value="SQLite", variable=self.output_format_var, command=self._on_format_changed
+            fmt_frame,
+            text="SQLite (Database)",
+            value="SQLite",
+            variable=self.output_format_var,
+            command=self._on_format_changed,
         ).pack(side=tk.LEFT, padx=5)
 
         # SQLite設定
@@ -165,7 +166,9 @@ class MainWindow(ttk.Frame):
         bottom_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
         # 実行ボタン
-        self.run_button = ttk.Button(bottom_frame, text="ソートを実行", command=self._run_sort_thread, style="Run.TButton")
+        self.run_button = ttk.Button(
+            bottom_frame, text="ソートを実行", command=self._run_sort_thread, style="Run.TButton"
+        )
         self.run_button.pack(fill=tk.X, pady=(0, 5))
 
         # ログテキストボックス
@@ -175,25 +178,36 @@ class MainWindow(ttk.Frame):
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
         # テーマ適用のための登録
-        self.app.theme_manager.apply_theme_to_widget_tree(self, self.app.theme_manager.themes[self.app.theme_manager.current_theme])
+        self.app.theme_manager.apply_theme_to_widget_tree(
+            self, self.app.theme_manager.themes[self.app.theme_manager.current_theme]
+        )
 
     def _setup_logging(self) -> None:
         """Text ウィジェットにログを出力するハンドラーを追加します。"""
         self.text_handler = TextHandler(self.log_text, self.parent)
-        self.text_handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S"))
+        self.text_handler.setFormatter(
+            logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S")
+        )
         logging.getLogger().addHandler(self.text_handler)
         logging.getLogger().setLevel(logging.INFO)
 
     def _browse_input(self) -> None:
-        path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv"), ("TSV files", "*.tsv"), ("All files", "*.*")])
+        path = filedialog.askopenfilename(
+            filetypes=[("CSV files", "*.csv"), ("TSV files", "*.tsv"), ("All files", "*.*")]
+        )
         if path:
             self.input_path_var.set(path)
 
     def _browse_output(self) -> None:
         if self.output_format_var.get() == "SQLite":
-            path = filedialog.asksaveasfilename(defaultextension=".db", filetypes=[("SQLite Database files", "*.db;*.sqlite"), ("All files", "*.*")])
+            path = filedialog.asksaveasfilename(
+                defaultextension=".db", filetypes=[("SQLite Database files", "*.db;*.sqlite"), ("All files", "*.*")]
+            )
         else:
-            path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv"), ("TSV files", "*.tsv"), ("All files", "*.*")])
+            path = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv"), ("TSV files", "*.tsv"), ("All files", "*.*")],
+            )
         if path:
             self.output_path_var.set(path)
 
@@ -219,7 +233,9 @@ class MainWindow(ttk.Frame):
 
         ttk.Label(dialog, text="データ型:").pack(pady=5)
         type_var = tk.StringVar(value="str")
-        type_combo = ttk.Combobox(dialog, textvariable=type_var, values=["str", "int", "float", "datetime"], state="readonly")
+        type_combo = ttk.Combobox(
+            dialog, textvariable=type_var, values=["str", "int", "float", "datetime"], state="readonly"
+        )
         type_combo.pack(pady=5)
 
         order_var = tk.StringVar(value="昇順")
@@ -309,7 +325,7 @@ class MainWindow(ttk.Frame):
                     val = None
 
                 # キャスト処理
-                casted_val = None
+                casted_val: Any = None
                 if val is not None and val != "":
                     try:
                         if col_type == "int":
@@ -394,10 +410,7 @@ class MainWindow(ttk.Frame):
                 journal_mode = self.app.settings_manager.get_setting("sqlite_journal_mode", "WAL")
                 synchronous = self.app.settings_manager.get_setting("sqlite_synchronous", "NORMAL")
                 writer = SQLiteWriter(
-                    table_name=table_name,
-                    has_header=has_header,
-                    journal_mode=journal_mode,
-                    synchronous=synchronous
+                    table_name=table_name, has_header=has_header, journal_mode=journal_mode, synchronous=synchronous
                 )
             else:
                 writer = CSVWriter()
@@ -410,10 +423,13 @@ class MainWindow(ttk.Frame):
             engine.execute(input_path=input_path, output_path=output_path, key_func=key_func)
 
             logger.info(f"ソート処理が完了しました！ 出力先: {output_path}")
-            self.parent.after(0, lambda: messagebox.showinfo("成功", f"ソート処理が完了しました。\n出力先: {output_path}"))
+            self.parent.after(
+                0, lambda: messagebox.showinfo("成功", f"ソート処理が完了しました。\n出力先: {output_path}")
+            )
 
         except Exception as e:
             logger.error(f"ソート処理中にエラーが発生しました: {e}", exc_info=True)
-            self.parent.after(0, lambda: messagebox.showerror("エラー", f"エラーが発生しました:\n{e}"))
+            err_msg = str(e)
+            self.parent.after(0, lambda: messagebox.showerror("エラー", f"エラーが発生しました:\n{err_msg}"))
         finally:
             self.parent.after(0, lambda: self.run_button.configure(state=tk.NORMAL))

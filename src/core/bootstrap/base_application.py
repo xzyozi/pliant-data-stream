@@ -1,18 +1,20 @@
 """Application interface for type hints (generalized version)"""
+
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-import logging
 from enum import Enum, auto
+import logging
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
-from core.events.event_dispatcher import EventDispatcher
 from core.config.settings_manager import BaseSettingsManager
+from core.events.event_dispatcher import EventDispatcher
+
+logger = logging.getLogger(__name__)
 
 
 class ApplicationState(Enum):
     """Defines the possible states of the application's lifecycle."""
+
     INITIALIZING = auto()
     READY = auto()
     RUNNING = auto()

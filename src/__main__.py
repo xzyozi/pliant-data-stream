@@ -5,11 +5,7 @@ from app import PliantApplication
 from windows.main_window import MainWindow
 
 # ログ設定の初期化
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger(__name__)
 
 
@@ -23,7 +19,7 @@ def main() -> None:
     app = PliantApplication(root)
 
     # メイン画面の構築
-    main_win = MainWindow(root, app)
+    MainWindow(root, app)
 
     # 閉じるボタンのイベント紐付け
     root.protocol("WM_DELETE_WINDOW", app.on_closing)

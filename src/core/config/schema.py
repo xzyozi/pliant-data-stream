@@ -7,6 +7,7 @@ SettingsManager.get_settings_schema() の戻り値型として使用し、
 SettingsWindow はこのスキーマを元に UI を動的生成する。
 アプリ側でも import して利用する唯一の公開型。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
