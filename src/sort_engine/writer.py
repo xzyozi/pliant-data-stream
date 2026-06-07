@@ -114,6 +114,28 @@ class SQLiteWriter(WriterProtocol):
                     header_cols = [f"col_{i}" for i in range(len(first_row))]
                     first_data_row = first_row
 
+            # 既存テーブルがある場合はスキーマ（カラム数・カラム名）の整合性を検証
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (self.table_name,))
+            if cursor.fetchone() is not None:
+                cursor.execute(f'PRAGMA table_info("{self.table_name}");')
+                existing_cols = cursor.fetchall()
+                existing_col_names = [col[1] for col in existing_cols]
+
+                if len(existing_col_names) != len(header_cols):
+                    raise ValueError(
+                        f"Schema mismatch: Table '{self.table_name}' has {len(existing_col_names)} columns, "
+                        f"but input data has {len(header_cols)} columns."
+                    )
+
+                existing_col_names_lower = [name.lower() for name in existing_col_names]
+                header_cols_lower = [name.lower() for name in header_cols]
+                if existing_col_names_lower != header_cols_lower:
+                    raise ValueError(
+                        f"Schema mismatch: Table '{self.table_name}' column names do not match. "
+                        f"Expected: {existing_col_names}, Given: {header_cols}."
+                    )
+
             # ヘッダー行のみでデータが空だった場合
             if first_data_row is None:
                 col_defs = ", ".join(f'"{col}" TEXT' for col in header_cols)

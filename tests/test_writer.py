@@ -299,4 +299,45 @@ def test_csv_writer_datetime_serialization() -> None:
             os.remove(temp_file_path)
 
 
+def test_sqlite_writer_schema_mismatch_validation() -> None:
+    """既存テーブルと入力データのスキーマが異なる場合に ValueError が送出されることを検証"""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as temp_db:
+        temp_db_path = temp_db.name
+
+    try:
+        # 1. 最初のテーブルを作成
+        writer1 = SQLiteWriter(table_name="mismatch_table", has_header=True)
+        data1 = [
+            ["ID", "Name"],
+            [1, "Alice"]
+        ]
+        writer1.write(iter(data1), temp_db_path)
+
+        # 2. カラム数が異なるデータを追記しようとして ValueError が送出されること
+        writer2 = SQLiteWriter(table_name="mismatch_table", has_header=True)
+        data_bad_count = [
+            ["ID", "Name", "Age"],
+            [2, "Bob", 30]
+        ]
+        with pytest.raises(ValueError) as exc_info:
+            writer2.write(iter(data_bad_count), temp_db_path)
+        assert "Schema mismatch" in str(exc_info.value)
+        assert "columns" in str(exc_info.value)
+
+        # 3. カラム名は異なるが、数が同じデータを追記しようとして ValueError が送出されること
+        data_bad_names = [
+            ["ID", "Title"],
+            [2, "Bob"]
+        ]
+        with pytest.raises(ValueError) as exc_info:
+            writer2.write(iter(data_bad_names), temp_db_path)
+        assert "Schema mismatch" in str(exc_info.value)
+        assert "column names do not match" in str(exc_info.value)
+
+    finally:
+        if os.path.exists(temp_db_path):
+            os.remove(temp_db_path)
+
+
+
 
