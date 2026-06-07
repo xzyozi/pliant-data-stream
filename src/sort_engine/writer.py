@@ -17,12 +17,17 @@ class CSVWriter(WriterProtocol):
         """
         self.delimiter = delimiter
 
+    def _serialize_row(self, row: list[Any]) -> list[Any]:
+        """datetime や date などのオブジェクトを ISO 8601 形式の文字列に変換します。"""
+        return [item.isoformat() if isinstance(item, (datetime, date)) else item for item in row]
+
     def write(self, rows: Iterator[list[Any]], dest_path: str) -> None:
         """データをCSVファイルに書き込みます。"""
         with open(dest_path, mode="w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f, delimiter=self.delimiter)
             for row in rows:
-                writer.writerow(row)
+                writer.writerow(self._serialize_row(row))
+
 
 
 class SQLiteWriter(WriterProtocol):

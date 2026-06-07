@@ -272,3 +272,31 @@ def test_sqlite_writer_explicit_column_types() -> None:
             os.remove(temp_db_path)
 
 
+def test_csv_writer_datetime_serialization() -> None:
+    """CSVWriter が datetime や date オブジェクトを ISO 8601 形式で書き出すことを検証"""
+    data = [
+        ["Name", "Joined"],
+        ["Alice", datetime(2026, 6, 7, 12, 30, 0)],
+        ["Bob", date(2026, 6, 8)],
+    ]
+
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as temp_file:
+        temp_file_path = temp_file.name
+
+    try:
+        writer = CSVWriter(delimiter=",")
+        writer.write(iter(data), temp_file_path)
+
+        with open(temp_file_path, mode="r", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+
+        assert len(lines) == 3
+        assert lines[0] == "Name,Joined"
+        assert lines[1] == "Alice,2026-06-07T12:30:00"
+        assert lines[2] == "Bob,2026-06-08"
+    finally:
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
+
+
