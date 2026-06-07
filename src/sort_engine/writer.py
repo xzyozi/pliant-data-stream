@@ -36,6 +36,7 @@ class SQLiteWriter(WriterProtocol):
         batch_size: int = 5000,
         journal_mode: str = "WAL",
         synchronous: str = "NORMAL",
+        column_types: dict[str, str] | None = None,
     ) -> None:
         """
         Args:
@@ -45,6 +46,7 @@ class SQLiteWriter(WriterProtocol):
             batch_size: バルクインサートを実行する単位行数。
             journal_mode: SQLiteのジャーナルモード（デフォルトは WAL）。
             synchronous: SQLiteの同期モード（デフォルトは NORMAL）。
+            column_types: カラム名から型定義文字列へのマッピング辞書。
         """
         self.table_name = table_name
         self.columns = columns
@@ -52,6 +54,7 @@ class SQLiteWriter(WriterProtocol):
         self.batch_size = batch_size
         self.journal_mode = journal_mode
         self.synchronous = synchronous
+        self.column_types = column_types
 
     def _map_to_sqlite_type(self, val: Any) -> str:
         """Pythonのオブジェクト型からSQLiteの型名へマッピングします。"""
@@ -113,11 +116,16 @@ class SQLiteWriter(WriterProtocol):
                 conn.commit()
                 return
 
-            # スキーマ（カラム型定義）の自動決定（最初のデータ行の型を反映）
-            col_types = [self._map_to_sqlite_type(val) for val in first_data_row]
+            # スキーマ（カラム型定義）の決定
             col_defs_list = []
-            for col_name, col_type in zip(header_cols, col_types):
-                col_defs_list.append(f'"{col_name}" {col_type}')
+            if self.column_types is not None:
+                for col_name in header_cols:
+                    col_type = self.column_types.get(col_name, "TEXT")
+                    col_defs_list.append(f'"{col_name}" {col_type}')
+            else:
+                col_types = [self._map_to_sqlite_type(val) for val in first_data_row]
+                for col_name, col_type in zip(header_cols, col_types):
+                    col_defs_list.append(f'"{col_name}" {col_type}')
             col_defs = ", ".join(col_defs_list)
 
             # テーブル作成

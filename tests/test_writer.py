@@ -233,3 +233,42 @@ def test_sqlite_writer_pragma_settings() -> None:
         if os.path.exists(temp_db_path):
             os.remove(temp_db_path)
 
+
+def test_sqlite_writer_explicit_column_types() -> None:
+    """column_types が明示された場合にその型でテーブルが作成されることを検証"""
+    data = [
+        ["ID", "Score", "Name"],
+        [1, 92.5, "Alice"],
+    ]
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as temp_db:
+        temp_db_path = temp_db.name
+
+    try:
+        # column_types を明示的に指定
+        writer = SQLiteWriter(
+            table_name="explicit_types_table",
+            has_header=True,
+            column_types={"ID": "INTEGER", "Score": "REAL", "Name": "TEXT"}
+        )
+        writer.write(iter(data), temp_db_path)
+
+        conn = sqlite3.connect(temp_db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("PRAGMA table_info(explicit_types_table);")
+        columns = cursor.fetchall()
+        assert len(columns) == 3
+        assert columns[0][1] == "ID"
+        assert columns[0][2] == "INTEGER"
+        assert columns[1][1] == "Score"
+        assert columns[1][2] == "REAL"
+        assert columns[2][1] == "Name"
+        assert columns[2][2] == "TEXT"
+
+        conn.close()
+    finally:
+        if os.path.exists(temp_db_path):
+            os.remove(temp_db_path)
+
+
