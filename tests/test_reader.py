@@ -63,8 +63,14 @@ def test_csv_reader_auto_detect_tsv() -> None:
 
 
 def test_csv_reader_secure_parse() -> None:
-    # 改行やダブルクォーテーションで囲まれたデリミタを含む複雑なCSV
-    content = 'ID,Name,Description\n1,Alice,"Line1\nLine2"\n2,Bob,"This is , a comma"'
+    # 改行、デリミタ（カンマ）、エスケープされたダブルクォーテーション（""）を含む複雑なCSV
+    content = (
+        'ID,Name,Description\n'
+        '1,Alice,"Line1\nLine2"\n'                      # 改行を含む行
+        '2,Bob,"This is , a comma"\n'                   # デリミタを含む行
+        '3,Charlie,"He said, ""Hello World!"""\n'        # エスケープされたダブルクォート ("")
+        '4,David,"Mixed: , \n and ""quotes"""\n'          # すべてが混在する行
+    )
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8", newline="") as temp_file:
         temp_file.write(content)
         temp_file_path = temp_file.name
@@ -73,11 +79,21 @@ def test_csv_reader_secure_parse() -> None:
         reader = CSVReader(delimiter=",")
         rows = list(reader.read(temp_file_path))
         
-        assert len(rows) == 3
+        # ヘッダーとデータ4行の計5行であること
+        assert len(rows) == 5
+        
+        # すべての行が欠損なく正しいカラム数（3列）でパースされていること
+        for idx, row in enumerate(rows):
+            assert len(row) == 3, f"Row {idx} has invalid column count: {row}"
+            
         assert rows[0] == ["ID", "Name", "Description"]
-        # ダブルクォーテーション内の改行が保持されているか
+        # 改行が正しく保持されていること
         assert rows[1] == ["1", "Alice", "Line1\nLine2"]
-        # ダブルクォーテーション内のデリミタ（カンマ）が保持されているか
+        # デリミタ（カンマ）が正しく保持されていること
         assert rows[2] == ["2", "Bob", "This is , a comma"]
+        # エスケープされたダブルクォーテーションが正しくデコードされていること
+        assert rows[3] == ["3", "Charlie", 'He said, "Hello World!"']
+        # 全要素の混在したフィールドが正しくパースされていること
+        assert rows[4] == ["4", "David", 'Mixed: , \n and "quotes"']
     finally:
         os.remove(temp_file_path)
