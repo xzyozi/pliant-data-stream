@@ -52,6 +52,15 @@ class SQLiteWriter(WriterProtocol):
             synchronous: SQLiteの同期モード（デフォルトは NORMAL）。
             column_types: カラム名から型定義文字列へのマッピング辞書。
         """
+        valid_journal_modes = {"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF"}
+        valid_synchronous = {"OFF", "NORMAL", "FULL", "EXTRA", "0", "1", "2", "3"}
+
+        if journal_mode.upper() not in valid_journal_modes:
+            raise ValueError(f"無効な journal_mode が指定されました: {journal_mode}")
+
+        if str(synchronous).upper() not in valid_synchronous:
+            raise ValueError(f"無効な synchronous が指定されました: {synchronous}")
+
         self.table_name = table_name
         self.columns = columns
         self.has_header = has_header

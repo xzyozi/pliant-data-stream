@@ -339,5 +339,17 @@ def test_sqlite_writer_schema_mismatch_validation() -> None:
             os.remove(temp_db_path)
 
 
+def test_sqlite_writer_invalid_pragma_validation() -> None:
+    """無効な PRAGMA パラメータが指定された場合に ValueError が送出されることを検証"""
+    with pytest.raises(ValueError) as exc_info:
+        SQLiteWriter(journal_mode="INVALID_MODE")
+    assert "無効な journal_mode" in str(exc_info.value)
+
+    with pytest.raises(ValueError) as exc_info:
+        SQLiteWriter(synchronous="DANGEROUS")
+    assert "無効な synchronous" in str(exc_info.value)
+
+
+
 
 
