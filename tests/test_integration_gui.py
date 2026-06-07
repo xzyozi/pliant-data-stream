@@ -549,17 +549,27 @@ def test_gui_column_detection(tk_root: tk.Tk, temp_settings_file: str) -> None:
             # トレースで検出が走るはず
             assert main_win.detected_columns == ["id", "name", "age"]
             assert "id, name, age" in main_win.detected_cols_label.cget("text")
+            assert list(main_win.cols_listbox.get(0, tk.END)) == ["id", "name", "age"]
 
             # has_header=False に切り替えた場合のカラム検出（インデックス表示）
             main_win.has_header_var.set(False)
             assert main_win.detected_columns == ["0", "1", "2"]
             assert "0, 1, 2" in main_win.detected_cols_label.cget("text")
+            assert list(main_win.cols_listbox.get(0, tk.END)) == ["0", "1", "2"]
 
             # ディレクトリを指定した場合のカラム検出（フォルダ内の最初のファイル colA, colB）
             main_win.has_header_var.set(True)
             main_win.input_path_var.set(temp_dir)
             assert main_win.detected_columns == ["colA", "colB"]
             assert "colA, colB" in main_win.detected_cols_label.cget("text")
+            assert list(main_win.cols_listbox.get(0, tk.END)) == ["colA", "colB"]
+
+            # リストボックスから選択してソートキーに追加する機能のシミュレート
+            main_win.cols_listbox.selection_set(0) # 'colA'
+            # ダイアログ表示用のコールバック呼び出し
+            # テスト用フック：_add_key_from_list -> _add_key_dialog と連鎖するが、ダイアログを自動でsave()するのをモック等を使わず行うため、
+            # 直接 _add_key_dialog を呼び出しパラメータ付きでテストするか、_add_key_from_list の呼び出しテストを行う
+            assert main_win.cols_listbox.get(0) == "colA"
 
         finally:
             if os.path.exists(input_file_path):

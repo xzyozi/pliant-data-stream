@@ -166,23 +166,50 @@ class MainWindow(ttk.Frame):
         self.detected_cols_label = ttk.Label(keys_frame, text="検出されたカラム: (なし)", wraplength=700)
         self.detected_cols_label.pack(anchor=tk.W, pady=(0, 5))
 
+        # 左右に分割するための親フレーム
+        panes_frame = ttk.Frame(keys_frame)
+        panes_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 左側：利用可能なカラム
+        avail_frame = ttk.LabelFrame(panes_frame, text="利用可能なカラム (ダブルクリックで追加)", padding=5)
+        avail_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+
+        self.cols_listbox = tk.Listbox(avail_frame, selectmode=tk.SINGLE, height=6)
+        self.cols_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.cols_listbox.bind("<Double-1>", lambda event: self._add_key_from_list())
+
+        # スクロールバー
+        avail_scroll = ttk.Scrollbar(avail_frame, orient=tk.VERTICAL, command=self.cols_listbox.yview)
+        avail_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.cols_listbox.config(yscrollcommand=avail_scroll.set)
+
+        # 中央：追加ボタン
+        mid_frame = ttk.Frame(panes_frame)
+        mid_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        self.add_from_list_btn = ttk.Button(mid_frame, text="追加 ➡️", command=self._add_key_from_list)
+        self.add_from_list_btn.pack(expand=True)
+
+        # 右側：ソート順の設定
+        config_frame = ttk.LabelFrame(panes_frame, text="ソート順の設定", padding=5)
+        config_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
+
         # キーリスト表示 (Treeview)
         columns = ("col_idx_or_name", "type", "order")
-        self.keys_tree = ttk.Treeview(keys_frame, columns=columns, show="headings", height=5)
+        self.keys_tree = ttk.Treeview(config_frame, columns=columns, show="headings", height=5)
         self.keys_tree.heading("col_idx_or_name", text="カラム名または列インデックス")
         self.keys_tree.heading("type", text="データ型")
         self.keys_tree.heading("order", text="並び順")
 
-        self.keys_tree.column("col_idx_or_name", width=300)
-        self.keys_tree.column("type", width=150)
-        self.keys_tree.column("order", width=150)
+        self.keys_tree.column("col_idx_or_name", width=180)
+        self.keys_tree.column("type", width=80)
+        self.keys_tree.column("order", width=80)
         self.keys_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
         # キー操作ボタン
-        btn_frame = ttk.Frame(keys_frame)
+        btn_frame = ttk.Frame(config_frame)
         btn_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
-        ttk.Button(btn_frame, text="キーを追加", command=self._add_key_dialog).pack(fill=tk.X, pady=2)
+        ttk.Button(btn_frame, text="新規追加...", command=self._add_key_dialog).pack(fill=tk.X, pady=2)
         ttk.Button(btn_frame, text="キーを削除", command=self._delete_key).pack(fill=tk.X, pady=2)
         ttk.Button(btn_frame, text="上へ移動", command=self._move_key_up).pack(fill=tk.X, pady=2)
         ttk.Button(btn_frame, text="下へ移動", command=self._move_key_down).pack(fill=tk.X, pady=2)
@@ -319,10 +346,16 @@ class MainWindow(ttk.Frame):
             else:
                 self.detected_cols_label.configure(text="検出されたカラム: (なし)")
 
+            # Listboxの更新
+            self.cols_listbox.delete(0, tk.END)
+            for col in self.detected_columns:
+                self.cols_listbox.insert(tk.END, col)
+
             logger.info(f"カラム名を検出しました: {self.detected_columns}")
         except Exception as e:
             logger.warning(f"カラム名の自動検出中にエラーが発生しました: {e}")
             self.detected_cols_label.configure(text="検出されたカラム: (なし)")
+            self.cols_listbox.delete(0, tk.END)
 
     def _on_input_path_changed(self) -> None:
         path = self.input_path_var.get().strip()
@@ -343,7 +376,15 @@ class MainWindow(ttk.Frame):
         if input_path:
             self._auto_set_output_path(input_path)
 
-    def _add_key_dialog(self) -> None:
+    def _add_key_from_list(self) -> None:
+        selected_indices = self.cols_listbox.curselection()
+        if not selected_indices:
+            messagebox.showinfo("情報", "利用可能なカラムから追加するカラムを選択してください。")
+            return
+        col_name = self.cols_listbox.get(selected_indices[0])
+        self._add_key_dialog(default_col=col_name)
+
+    def _add_key_dialog(self, default_col: str | None = None) -> None:
         dialog = tk.Toplevel(self)
         dialog.title("ソートキーの追加")
         dialog.geometry("350x200")
@@ -351,11 +392,14 @@ class MainWindow(ttk.Frame):
         self.app.theme_manager.apply_theme_to_toplevel(dialog)
 
         ttk.Label(dialog, text="カラム名または列インデックス:").pack(pady=5)
-        col_var = tk.StringVar()
+        col_var = tk.StringVar(value=default_col if default_col else "")
         entry = ttk.Combobox(dialog, textvariable=col_var, width=28)
         if self.detected_columns:
             entry["values"] = self.detected_columns
-            entry.current(0)
+            if default_col and default_col in self.detected_columns:
+                entry.set(default_col)
+            else:
+                entry.current(0)
         entry.pack(pady=5)
 
         ttk.Label(dialog, text="データ型:").pack(pady=5)
