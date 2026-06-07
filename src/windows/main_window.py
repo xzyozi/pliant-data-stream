@@ -197,6 +197,22 @@ class MainWindow(ttk.Frame):
         )
         if path:
             self.input_path_var.set(path)
+            self._auto_set_output_path(path)
+
+    def _auto_set_output_path(self, input_path: str) -> None:
+        if not input_path:
+            return
+        dir_name, file_name = os.path.split(input_path)
+        base_name, ext = os.path.splitext(file_name)
+
+        if self.output_format_var.get() == "SQLite":
+            out_ext = ".db"
+        else:
+            out_ext = ext if ext else ".csv"
+
+        output_name = f"{base_name}_sorted{out_ext}"
+        output_path = os.path.join(dir_name, output_name)
+        self.output_path_var.set(output_path)
 
     def _browse_output(self) -> None:
         if self.output_format_var.get() == "SQLite":
@@ -219,6 +235,10 @@ class MainWindow(ttk.Frame):
             self.sqlite_frame.grid(row=3, column=2, sticky=tk.W, padx=10)
         else:
             self.sqlite_frame.grid_forget()
+
+        input_path = self.input_path_var.get().strip()
+        if input_path:
+            self._auto_set_output_path(input_path)
 
     def _add_key_dialog(self) -> None:
         dialog = tk.Toplevel(self)
@@ -299,7 +319,7 @@ class MainWindow(ttk.Frame):
             # CSVReader を使用した場合は、読み込み時に型変換が行われるため、
             # row にはすでに変換後の値が入っている可能性がある。
             # しかし、念のためここでも型変換を試みる。
-            key_values = []
+            key_values: list[Any] = []
             for col_key, col_type, is_descending in key_settings:
                 # インデックスかカラム名かの特定
                 val = None

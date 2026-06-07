@@ -435,3 +435,25 @@ def test_gui_sort_pipeline_sqlite(tk_root: tk.Tk, temp_settings_file: str) -> No
             os.remove(input_path)
         if os.path.exists(output_path):
             os.remove(output_path)
+
+
+def test_gui_auto_set_output_path(tk_root: tk.Tk) -> None:
+    """入力ファイル選択時の出力パス自動設定機能のテスト。"""
+    app = PliantApplication(tk_root)
+    main_win = MainWindow(tk_root, app)
+
+    # 1. CSV形式の場合の補完
+    main_win.output_format_var.set("CSV")
+    main_win._auto_set_output_path("C:/data/user_profile.csv")
+    assert main_win.output_path_var.get().replace("\\", "/") == "C:/data/user_profile_sorted.csv"
+
+    # 2. SQLite形式の場合の補完
+    main_win.output_format_var.set("SQLite")
+    main_win._auto_set_output_path("C:/data/user_profile.csv")
+    assert main_win.output_path_var.get().replace("\\", "/") == "C:/data/user_profile_sorted.db"
+
+    # 3. 拡張子がない場合の補完
+    main_win.output_format_var.set("CSV")
+    main_win._auto_set_output_path("C:/data/raw_data")
+    assert main_win.output_path_var.get().replace("\\", "/") == "C:/data/raw_data_sorted.csv"
+
