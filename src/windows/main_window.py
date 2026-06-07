@@ -73,6 +73,7 @@ class MainWindow(ttk.Frame):
         self.input_path_var = tk.StringVar()
         self.output_path_var = tk.StringVar()
         self.has_header_var = tk.BooleanVar(value=True)
+        self.auto_sync_path_var = tk.BooleanVar(value=True)
 
         # 出力設定
         self.output_format_var = tk.StringVar(value="CSV")
@@ -97,25 +98,40 @@ class MainWindow(ttk.Frame):
         files_frame = ttk.LabelFrame(self, text="データソースと出力先の設定", padding=10)
         files_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        # 入力ファイル
-        ttk.Label(files_frame, text="入力CSVファイル:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(files_frame, textvariable=self.input_path_var, width=60).grid(row=0, column=1, padx=5, pady=5)
-        ttk.Button(files_frame, text="選択...", command=self._browse_input).grid(row=0, column=2, padx=5, pady=5)
+        # 入力
+        ttk.Label(files_frame, text="入力(ファイル/フォルダ):").grid(row=0, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(files_frame, textvariable=self.input_path_var, width=50).grid(row=0, column=1, padx=5, pady=5)
+        ttk.Button(files_frame, text="ファイル選択...", command=self._browse_input).grid(
+            row=0, column=2, padx=5, pady=5
+        )
+        ttk.Button(files_frame, text="フォルダ選択...", command=self._browse_input_dir).grid(
+            row=0, column=3, padx=5, pady=5
+        )
 
-        # ヘッダーチェックボックス
+        # ヘッダー / 自動同期チェックボックス
+        cb_frame = ttk.Frame(files_frame)
+        cb_frame.grid(row=1, column=1, columnspan=3, sticky=tk.W)
         ttk.Checkbutton(
-            files_frame, text="1行目をヘッダーとして扱う", variable=self.has_header_var, command=self._on_header_toggled
-        ).grid(row=1, column=1, sticky=tk.W, pady=2)
+            cb_frame, text="1行目をヘッダーとして扱う", variable=self.has_header_var, command=self._on_header_toggled
+        ).pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Checkbutton(
+            cb_frame, text="出力先を入力パスと同期する", variable=self.auto_sync_path_var, command=self._on_sync_toggled
+        ).pack(side=tk.LEFT)
 
-        # 出力ファイル
-        ttk.Label(files_frame, text="出力先ファイル:").grid(row=2, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(files_frame, textvariable=self.output_path_var, width=60).grid(row=2, column=1, padx=5, pady=5)
-        ttk.Button(files_frame, text="選択...", command=self._browse_output).grid(row=2, column=2, padx=5, pady=5)
+        # 出力先
+        ttk.Label(files_frame, text="出力先(ファイル/フォルダ):").grid(row=2, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(files_frame, textvariable=self.output_path_var, width=50).grid(row=2, column=1, padx=5, pady=5)
+        ttk.Button(files_frame, text="ファイル選択...", command=self._browse_output).grid(
+            row=2, column=2, padx=5, pady=5
+        )
+        ttk.Button(files_frame, text="フォルダ選択...", command=self._browse_output_dir).grid(
+            row=2, column=3, padx=5, pady=5
+        )
 
         # 出力形式
         ttk.Label(files_frame, text="出力形式:").grid(row=3, column=0, sticky=tk.W, pady=5)
         fmt_frame = ttk.Frame(files_frame)
-        fmt_frame.grid(row=3, column=1, columnspan=2, sticky=tk.W)
+        fmt_frame.grid(row=3, column=1, columnspan=3, sticky=tk.W)
         ttk.Radiobutton(
             fmt_frame, text="CSV/TSV", value="CSV", variable=self.output_format_var, command=self._on_format_changed
         ).pack(side=tk.LEFT, padx=5)
@@ -199,20 +215,33 @@ class MainWindow(ttk.Frame):
             self.input_path_var.set(path)
             self._auto_set_output_path(path)
 
+    def _browse_input_dir(self) -> None:
+        path = filedialog.askdirectory()
+        if path:
+            self.input_path_var.set(path)
+            self._auto_set_output_path(path)
+
     def _auto_set_output_path(self, input_path: str) -> None:
-        if not input_path:
+        if not input_path or not self.auto_sync_path_var.get():
             return
-        dir_name, file_name = os.path.split(input_path)
-        base_name, ext = os.path.splitext(file_name)
 
-        if self.output_format_var.get() == "SQLite":
-            out_ext = ".db"
+        if os.path.isdir(input_path):
+            dir_name, base_name = os.path.split(os.path.normpath(input_path))
+            output_name = f"{base_name}_sorted"
+            output_path = os.path.join(dir_name, output_name)
+            self.output_path_var.set(output_path)
         else:
-            out_ext = ext if ext else ".csv"
+            dir_name, file_name = os.path.split(input_path)
+            base_name, ext = os.path.splitext(file_name)
 
-        output_name = f"{base_name}_sorted{out_ext}"
-        output_path = os.path.join(dir_name, output_name)
-        self.output_path_var.set(output_path)
+            if self.output_format_var.get() == "SQLite":
+                out_ext = ".db"
+            else:
+                out_ext = ext if ext else ".csv"
+
+            output_name = f"{base_name}_sorted{out_ext}"
+            output_path = os.path.join(dir_name, output_name)
+            self.output_path_var.set(output_path)
 
     def _browse_output(self) -> None:
         if self.output_format_var.get() == "SQLite":
@@ -227,8 +256,17 @@ class MainWindow(ttk.Frame):
         if path:
             self.output_path_var.set(path)
 
+    def _browse_output_dir(self) -> None:
+        path = filedialog.askdirectory()
+        if path:
+            self.output_path_var.set(path)
+
     def _on_header_toggled(self) -> None:
         pass
+
+    def _on_sync_toggled(self) -> None:
+        if self.auto_sync_path_var.get():
+            self._auto_set_output_path(self.input_path_var.get())
 
     def _on_format_changed(self) -> None:
         if self.output_format_var.get() == "SQLite":
@@ -386,14 +424,19 @@ class MainWindow(ttk.Frame):
         output_path = self.output_path_var.get().strip()
 
         if not input_path or not os.path.exists(input_path):
-            messagebox.showerror("エラー", "正しい入力ファイルを指定してください。")
+            messagebox.showerror("エラー", "正しい入力ファイルまたはフォルダを指定してください。")
             return
         if not output_path:
-            messagebox.showerror("エラー", "出力ファイルを指定してください。")
+            messagebox.showerror("エラー", "出力先を指定してください。")
             return
         if not self.keys_tree.get_children():
             messagebox.showerror("エラー", "ソートキーを少なくとも1つ追加してください。")
             return
+
+        if os.path.isdir(input_path):
+            if os.path.isfile(output_path):
+                messagebox.showerror("エラー", "入力がフォルダの場合、出力先にはフォルダを指定してください。")
+                return
 
         self.run_button.configure(state=tk.DISABLED)
         thread = threading.Thread(target=self._execute_sort, args=(input_path, output_path), daemon=True)
@@ -403,46 +446,53 @@ class MainWindow(ttk.Frame):
         try:
             logger.info("ソート処理を開始します...")
 
-            # 設定値の取得
             chunk_size = self.app.settings_manager.get_setting("default_chunk_size", 50000)
             has_header = self.has_header_var.get()
             output_format = self.output_format_var.get()
 
-            # Readerの初期化
-            # ソートキーを正しくインデックス化するために、一度 Reader のヘッダーを先読みする
-            reader = CSVReader(has_header=has_header)
-            # 一時的にヘッダーを特定するために先読み
-            temp_stream = reader.read(input_path)
-            try:
-                # 最初のイテレートでヘッダーが確定する
-                next(temp_stream)
-            except StopIteration:
-                pass
-            self._active_reader_header = getattr(reader, "header", None)
+            is_dir_mode = os.path.isdir(input_path)
 
-            # 再び新鮮なリーダーを用意する
-            reader = CSVReader(has_header=has_header)
+            if is_dir_mode:
+                os.makedirs(output_path, exist_ok=True)
+                target_files = []
+                for entry_name in os.listdir(input_path):
+                    full_in = os.path.join(input_path, entry_name)
+                    if os.path.isfile(full_in) and entry_name.lower().endswith((".csv", ".tsv")):
+                        target_files.append(full_in)
 
-            # Sorterの初期化
-            sorter = ExternalMergeSorter(chunk_size=chunk_size)
+                if not target_files:
+                    raise FileNotFoundError("指定されたフォルダ内に対象となるCSV/TSVファイルが見つかりません。")
 
-            # Writerの初期化
-            if output_format == "SQLite":
-                table_name = self.sqlite_table_name_var.get().strip() or "sorted_data"
-                journal_mode = self.app.settings_manager.get_setting("sqlite_journal_mode", "WAL")
-                synchronous = self.app.settings_manager.get_setting("sqlite_synchronous", "NORMAL")
-                writer = SQLiteWriter(
-                    table_name=table_name, has_header=has_header, journal_mode=journal_mode, synchronous=synchronous
-                )
+                logger.info(f"{len(target_files)} 件のファイルの一括処理を開始します。")
+
+                for i, file_in in enumerate(target_files, 1):
+                    file_name = os.path.basename(file_in)
+                    base_name, ext = os.path.splitext(file_name)
+
+                    if output_format == "SQLite":
+                        out_ext = ".db"
+                    else:
+                        out_ext = ext if ext else ".csv"
+
+                    file_out = os.path.join(output_path, f"{base_name}_sorted{out_ext}")
+                    logger.info(f"[{i}/{len(target_files)}] 処理中: {file_name} -> {os.path.basename(file_out)}")
+                    self._execute_single_sort(file_in, file_out, chunk_size, has_header, output_format)
             else:
-                writer = CSVWriter()
+                if os.path.isdir(output_path):
+                    file_name = os.path.basename(input_path)
+                    base_name, ext = os.path.splitext(file_name)
+                    if output_format == "SQLite":
+                        out_ext = ".db"
+                    else:
+                        out_ext = ext if ext else ".csv"
+                    file_out = os.path.join(output_path, f"{base_name}_sorted{out_ext}")
+                else:
+                    parent_dir = os.path.dirname(output_path)
+                    if parent_dir:
+                        os.makedirs(parent_dir, exist_ok=True)
+                    file_out = output_path
 
-            # ソートキー評価関数の生成
-            key_func = self._build_key_func()
-
-            # エンジンの構築と実行
-            engine = SortEngine(reader=reader, sorter=sorter, writer=writer)
-            engine.execute(input_path=input_path, output_path=output_path, key_func=key_func)
+                self._execute_single_sort(input_path, file_out, chunk_size, has_header, output_format)
 
             logger.info(f"ソート処理が完了しました！ 出力先: {output_path}")
             self.parent.after(
@@ -455,3 +505,44 @@ class MainWindow(ttk.Frame):
             self.parent.after(0, lambda: messagebox.showerror("エラー", f"エラーが発生しました:\n{err_msg}"))
         finally:
             self.parent.after(0, lambda: self.run_button.configure(state=tk.NORMAL))
+
+    def _execute_single_sort(
+        self, file_in: str, file_out: str, chunk_size: int, has_header: bool, output_format: str
+    ) -> None:
+        reader = CSVReader(has_header=has_header)
+        temp_stream = reader.read(file_in)
+        try:
+            next(temp_stream)
+        except StopIteration:
+            pass
+        self._active_reader_header = getattr(reader, "header", None)
+
+        reader = CSVReader(has_header=has_header)
+        sorter = ExternalMergeSorter(chunk_size=chunk_size)
+
+        if output_format == "SQLite":
+            gui_table_name = self.sqlite_table_name_var.get().strip()
+            is_dir_input = os.path.isdir(self.input_path_var.get().strip())
+
+            if gui_table_name and not is_dir_input:
+                table_name = gui_table_name
+            else:
+                file_name = os.path.basename(file_in)
+                base_name, _ = os.path.splitext(file_name)
+                table_name = "".join(c for c in base_name if c.isalnum() or c == "_")
+                if table_name and table_name[0].isdigit():
+                    table_name = f"t_{table_name}"
+                if not table_name:
+                    table_name = "sorted_data"
+
+            journal_mode = self.app.settings_manager.get_setting("sqlite_journal_mode", "WAL")
+            synchronous = self.app.settings_manager.get_setting("sqlite_synchronous", "NORMAL")
+            writer = SQLiteWriter(
+                table_name=table_name, has_header=has_header, journal_mode=journal_mode, synchronous=synchronous
+            )
+        else:
+            writer = CSVWriter()
+
+        key_func = self._build_key_func()
+        engine = SortEngine(reader=reader, sorter=sorter, writer=writer)
+        engine.execute(input_path=file_in, output_path=file_out, key_func=key_func)

@@ -442,12 +442,13 @@ def test_gui_auto_set_output_path(tk_root: tk.Tk) -> None:
     app = PliantApplication(tk_root)
     main_win = MainWindow(tk_root, app)
 
-    # 1. CSV形式の場合の補完
+    # 1. CSV形式の場合の補完 (同期ON)
+    main_win.auto_sync_path_var.set(True)
     main_win.output_format_var.set("CSV")
     main_win._auto_set_output_path("C:/data/user_profile.csv")
     assert main_win.output_path_var.get().replace("\\", "/") == "C:/data/user_profile_sorted.csv"
 
-    # 2. SQLite形式の場合の補完
+    # 2. SQLite形式の場合の補完 (同期ON)
     main_win.output_format_var.set("SQLite")
     main_win._auto_set_output_path("C:/data/user_profile.csv")
     assert main_win.output_path_var.get().replace("\\", "/") == "C:/data/user_profile_sorted.db"
@@ -456,4 +457,67 @@ def test_gui_auto_set_output_path(tk_root: tk.Tk) -> None:
     main_win.output_format_var.set("CSV")
     main_win._auto_set_output_path("C:/data/raw_data")
     assert main_win.output_path_var.get().replace("\\", "/") == "C:/data/raw_data_sorted.csv"
+
+    # 4. 同期がOFFの場合の補完なし
+    main_win.auto_sync_path_var.set(False)
+    main_win.output_path_var.set("C:/data/original.csv")
+    main_win._auto_set_output_path("C:/data/another.csv")
+    # 値が書き換わっていないこと
+    assert main_win.output_path_var.get().replace("\\", "/") == "C:/data/original.csv"
+
+
+def test_gui_sort_pipeline_dir(tk_root: tk.Tk, temp_settings_file: str) -> None:
+    """ディレクトリ一括ソート処理の結合テスト。"""
+    app = PliantApplication(tk_root)
+    app.settings_manager.settings_path = temp_settings_file
+
+    main_win = MainWindow(tk_root, app)
+
+    # 一時的な入力ディレクトリと複数のCSVファイルの作成
+    with tempfile.TemporaryDirectory() as in_dir, tempfile.TemporaryDirectory() as out_dir:
+        # ファイル1
+        file1 = os.path.join(in_dir, "data1.csv")
+        with open(file1, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["id", "score"])
+            writer.writerow(["1", "90"])
+            writer.writerow(["2", "80"])
+
+        # ファイル2
+        file2 = os.path.join(in_dir, "data2.csv")
+        with open(file2, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["id", "score"])
+            writer.writerow(["3", "70"])
+            writer.writerow(["4", "85"])
+
+        # GUI変数設定
+        main_win.input_path_var.set(in_dir)
+        main_win.output_path_var.set(out_dir)
+        main_win.has_header_var.set(True)
+        main_win.output_format_var.set("CSV")
+
+        # ソートキー設定 (scoreを数値で昇順)
+        main_win.keys_tree.insert("", tk.END, values=("score", "int", "昇順"))
+
+        # 実行
+        main_win._execute_sort(in_dir, out_dir)
+
+        # 結果確認
+        out_file1 = os.path.join(out_dir, "data1_sorted.csv")
+        out_file2 = os.path.join(out_dir, "data2_sorted.csv")
+
+        assert os.path.exists(out_file1)
+        assert os.path.exists(out_file2)
+
+        with open(out_file1, "r", encoding="utf-8") as f:
+            reader = list(csv.reader(f))
+            assert reader[1] == ["2", "80"]
+            assert reader[2] == ["1", "90"]
+
+        with open(out_file2, "r", encoding="utf-8") as f:
+            reader = list(csv.reader(f))
+            assert reader[1] == ["3", "70"]
+            assert reader[2] == ["4", "85"]
+
 
