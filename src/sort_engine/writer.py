@@ -161,42 +161,41 @@ class SQLiteWriter(WriterProtocol):
                 if table_exists:
                     return
                 col_defs = ", ".join(f'"{self._escape_identifier(col)}" TEXT' for col in header_cols)
-                conn.execute(f'CREATE TABLE IF NOT EXISTS "{escaped_table_name}" ({col_defs});')
-                conn.commit()
+                with conn:
+                    conn.execute(f'CREATE TABLE IF NOT EXISTS "{escaped_table_name}" ({col_defs});')
                 return
 
-            if not table_exists:
-                # スキーマ（カラム型定義）の決定
-                col_defs_list = []
-                if self.column_types is not None:
-                    for col_name in header_cols:
-                        col_type = self.column_types.get(col_name, "TEXT")
-                        col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
-                else:
-                    col_types = [self._map_to_sqlite_type(val) for val in first_data_row]
-                    for col_name, col_type in zip(header_cols, col_types):
-                        col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
-                col_defs = ", ".join(col_defs_list)
+            with conn:
+                if not table_exists:
+                    # スキーマ（カラム型定義）の決定
+                    col_defs_list = []
+                    if self.column_types is not None:
+                        for col_name in header_cols:
+                            col_type = self.column_types.get(col_name, "TEXT")
+                            col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
+                    else:
+                        col_types = [self._map_to_sqlite_type(val) for val in first_data_row]
+                        for col_name, col_type in zip(header_cols, col_types):
+                            col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
+                    col_defs = ", ".join(col_defs_list)
 
-                # テーブル作成
-                conn.execute(f'CREATE TABLE IF NOT EXISTS "{escaped_table_name}" ({col_defs});')
+                    # テーブル作成
+                    conn.execute(f'CREATE TABLE IF NOT EXISTS "{escaped_table_name}" ({col_defs});')
 
-            # パラメータSQL
-            placeholders = ", ".join(["?"] * len(header_cols))
-            insert_sql = f'INSERT INTO "{escaped_table_name}" VALUES ({placeholders});'
+                # パラメータSQL
+                placeholders = ", ".join(["?"] * len(header_cols))
+                insert_sql = f'INSERT INTO "{escaped_table_name}" VALUES ({placeholders});'
 
-            # バッファリングとインサート
-            batch = [self._serialize_row(first_data_row)]
+                # バッファリングとインサート
+                batch = [self._serialize_row(first_data_row)]
 
-            for row in rows:
-                batch.append(self._serialize_row(row))
-                if len(batch) >= self.batch_size:
+                for row in rows:
+                    batch.append(self._serialize_row(row))
+                    if len(batch) >= self.batch_size:
+                        conn.executemany(insert_sql, batch)
+                        batch.clear()
+
+                if batch:
                     conn.executemany(insert_sql, batch)
-                    batch.clear()
-
-            if batch:
-                conn.executemany(insert_sql, batch)
-
-            conn.commit()
         finally:
             conn.close()
