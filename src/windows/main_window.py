@@ -287,6 +287,8 @@ class MainWindow(ttk.Frame):
 
         for item in self.keys_tree.get_children():
             values = self.keys_tree.item(item, "values")
+            if not isinstance(values, (list, tuple)) or len(values) < 3:
+                continue
             col_key = values[0]
             col_type = values[1]
             is_descending = values[2] == "降順"
