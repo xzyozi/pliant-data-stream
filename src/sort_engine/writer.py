@@ -69,6 +69,10 @@ class SQLiteWriter(WriterProtocol):
         self.synchronous = synchronous
         self.column_types = column_types
 
+    def _escape_identifier(self, identifier: str) -> str:
+        """SQL識別子（テーブル名やカラム名）内のダブルクォートをエスケープします。"""
+        return identifier.replace('"', '""')
+
     def _map_to_sqlite_type(self, val: Any) -> str:
         """Pythonのオブジェクト型からSQLiteの型名へマッピングします。"""
         if isinstance(val, int):
@@ -124,9 +128,10 @@ class SQLiteWriter(WriterProtocol):
 
             # 既存テーブルがある場合はスキーマ（カラム数・カラム名）の整合性を検証
             cursor = conn.cursor()
+            escaped_table_name = self._escape_identifier(self.table_name)
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (self.table_name,))
             if cursor.fetchone() is not None:
-                cursor.execute(f'PRAGMA table_info("{self.table_name}");')
+                cursor.execute(f'PRAGMA table_info("{escaped_table_name}");')
                 existing_cols = cursor.fetchall()
                 existing_col_names = [col[1] for col in existing_cols]
 
@@ -146,8 +151,8 @@ class SQLiteWriter(WriterProtocol):
 
             # ヘッダー行のみでデータが空だった場合
             if first_data_row is None:
-                col_defs = ", ".join(f'"{col}" TEXT' for col in header_cols)
-                conn.execute(f'CREATE TABLE IF NOT EXISTS "{self.table_name}" ({col_defs});')
+                col_defs = ", ".join(f'"{self._escape_identifier(col)}" TEXT' for col in header_cols)
+                conn.execute(f'CREATE TABLE IF NOT EXISTS "{escaped_table_name}" ({col_defs});')
                 conn.commit()
                 return
 
@@ -156,19 +161,19 @@ class SQLiteWriter(WriterProtocol):
             if self.column_types is not None:
                 for col_name in header_cols:
                     col_type = self.column_types.get(col_name, "TEXT")
-                    col_defs_list.append(f'"{col_name}" {col_type}')
+                    col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
             else:
                 col_types = [self._map_to_sqlite_type(val) for val in first_data_row]
                 for col_name, col_type in zip(header_cols, col_types):
-                    col_defs_list.append(f'"{col_name}" {col_type}')
+                    col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
             col_defs = ", ".join(col_defs_list)
 
             # テーブル作成
-            conn.execute(f'CREATE TABLE IF NOT EXISTS "{self.table_name}" ({col_defs});')
+            conn.execute(f'CREATE TABLE IF NOT EXISTS "{escaped_table_name}" ({col_defs});')
 
             # パラメータSQL
             placeholders = ", ".join(["?"] * len(header_cols))
-            insert_sql = f'INSERT INTO "{self.table_name}" VALUES ({placeholders});'
+            insert_sql = f'INSERT INTO "{escaped_table_name}" VALUES ({placeholders});'
 
             # バッファリングとインサート
             batch = [self._serialize_row(first_data_row)]

@@ -350,6 +350,47 @@ def test_sqlite_writer_invalid_pragma_validation() -> None:
     assert "無効な synchronous" in str(exc_info.value)
 
 
+def test_sqlite_writer_identifier_escaping() -> None:
+    """テーブル名やカラム名にダブルクォートが含まれても正しくエスケープされて書き込みできることを検証"""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as temp_db:
+        temp_db_path = temp_db.name
+
+    try:
+        # テーブル名やカラム名にダブルクォートを含める
+        writer = SQLiteWriter(
+            table_name='test_"table"',
+            has_header=True
+        )
+        data = [
+            ['id"col', 'name"col'],
+            [1, 'Alice']
+        ]
+        # エラーにならずに書き込み完了すること
+        writer.write(iter(data), temp_db_path)
+
+        conn = sqlite3.connect(temp_db_path)
+        cursor = conn.cursor()
+
+        # テーブル情報を取得してカラム名が正しく作成されているか確認
+        cursor.execute('PRAGMA table_info("test_""table""");')
+        columns = cursor.fetchall()
+        assert len(columns) == 2
+        assert columns[0][1] == 'id"col'
+        assert columns[1][1] == 'name"col'
+
+        # データをセレクトして確認
+        cursor.execute('SELECT * FROM "test_""table""";')
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        assert rows[0] == (1, 'Alice')
+
+        conn.close()
+    finally:
+        if os.path.exists(temp_db_path):
+            os.remove(temp_db_path)
+
+
+
 
 
 
