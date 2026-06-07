@@ -548,15 +548,18 @@ def test_gui_column_detection(tk_root: tk.Tk, temp_settings_file: str) -> None:
             main_win.input_path_var.set(input_file_path)
             # トレースで検出が走るはず
             assert main_win.detected_columns == ["id", "name", "age"]
+            assert "id, name, age" in main_win.detected_cols_label.cget("text")
 
             # has_header=False に切り替えた場合のカラム検出（インデックス表示）
             main_win.has_header_var.set(False)
             assert main_win.detected_columns == ["0", "1", "2"]
+            assert "0, 1, 2" in main_win.detected_cols_label.cget("text")
 
             # ディレクトリを指定した場合のカラム検出（フォルダ内の最初のファイル colA, colB）
             main_win.has_header_var.set(True)
             main_win.input_path_var.set(temp_dir)
             assert main_win.detected_columns == ["colA", "colB"]
+            assert "colA, colB" in main_win.detected_cols_label.cget("text")
 
         finally:
             if os.path.exists(input_file_path):

@@ -162,6 +162,10 @@ class MainWindow(ttk.Frame):
         keys_frame = ttk.LabelFrame(self, text="ソートキーの設定 (優先度順)", padding=10)
         keys_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
+        # 検出されたカラムの表示ラベル
+        self.detected_cols_label = ttk.Label(keys_frame, text="検出されたカラム: (なし)", wraplength=700)
+        self.detected_cols_label.pack(anchor=tk.W, pady=(0, 5))
+
         # キーリスト表示 (Treeview)
         columns = ("col_idx_or_name", "type", "order")
         self.keys_tree = ttk.Treeview(keys_frame, columns=columns, show="headings", height=5)
@@ -310,9 +314,15 @@ class MainWindow(ttk.Frame):
             else:
                 self.detected_columns = [str(i) for i in range(len(first_row))]
 
+            if self.detected_columns:
+                self.detected_cols_label.configure(text=f"検出されたカラム: {', '.join(self.detected_columns)}")
+            else:
+                self.detected_cols_label.configure(text="検出されたカラム: (なし)")
+
             logger.info(f"カラム名を検出しました: {self.detected_columns}")
         except Exception as e:
             logger.warning(f"カラム名の自動検出中にエラーが発生しました: {e}")
+            self.detected_cols_label.configure(text="検出されたカラム: (なし)")
 
     def _on_input_path_changed(self) -> None:
         path = self.input_path_var.get().strip()
