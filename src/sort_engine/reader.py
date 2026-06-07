@@ -1,12 +1,9 @@
 import csv
 from datetime import date, datetime
 import itertools
-import logging
 from typing import Any, Callable, Iterator, List, Optional, Union
 
 from .interface import ReaderProtocol
-
-logger = logging.getLogger(__name__)
 
 # 型定義
 CastType = Union[int, float, datetime, date, str]
@@ -236,18 +233,28 @@ def _count_date_format(val: str, counters: dict[str, int]) -> None:
             pass
 
 
-def _read_sniffer_sample(file_path: str, n_lines: int = _SNIFFER_SAMPLE_LINES) -> str:
+def _read_sniffer_sample(
+    file_path: str,
+    n_lines: int = _SNIFFER_SAMPLE_LINES,
+    on_warn: Optional[Callable[[str], None]] = None,
+) -> str:
     """Sniffer に渡すサンプルを「完全な行」単位で取得します。
 
     ``f.read(N)`` では行の途中で切れてダブルクオート内改行を誤認識する可能性があるため、
     ``readline()`` を使って完全な行のみを収集します。
+
+    Args:
+        file_path: 対象ファイルのパス。
+        n_lines: 取得する行数。
+        on_warn: 警告メッセージを受け取るコールバック。省略時は無視します。
     """
     try:
         with open(file_path, mode="r", encoding="utf-8", newline="") as f:
             lines = [f.readline() for _ in range(n_lines)]
         return "".join(lines)
     except OSError as e:
-        logger.warning("サンプル取得に失敗しました: %s", e)
+        if on_warn is not None:
+            on_warn(f"サンプル取得に失敗しました: {e}")
         return ""
 
 
@@ -261,6 +268,7 @@ class CSVReader(ReaderProtocol):
         auto_cast: bool = True,
         infer_rows: int = 10,
         enable_timestamp_cast: bool = False,
+        on_warn: Optional[Callable[[str], None]] = None,
     ) -> None:
         """
         Args:
@@ -272,12 +280,16 @@ class CSVReader(ReaderProtocol):
             enable_timestamp_cast: Trueの場合、10桁(秒)/13桁(ミリ秒)の数値をUnixタイムスタンプ
                 として datetime に変換します。デフォルトは ``False``。
                 業務ID・電話番号など10桁の数値が混在するデータでは無効のまま使用してください。
+            on_warn: 自動判定の失敗など、処理を継続しつつ呼び出し元へ通知したい警告を
+                受け取るコールバック関数。``lambda msg: logging.warning(msg)`` のように
+                任意のロガーへ接続できます。省略時は警告を無視します。
         """
         self.delimiter = delimiter
         self.has_header = has_header
         self.auto_cast = auto_cast
         self.infer_rows = infer_rows
         self.enable_timestamp_cast = enable_timestamp_cast
+        self.on_warn = on_warn
 
     def _detect_delimiter(self, file_path: str) -> str:
         """指定のパスのファイルからデリミタを自動判定します。
@@ -288,13 +300,14 @@ class CSVReader(ReaderProtocol):
         if self.delimiter is not None:
             return self.delimiter
 
-        sample = _read_sniffer_sample(file_path)
+        sample = _read_sniffer_sample(file_path, on_warn=self.on_warn)
         if sample:
             try:
                 dialect = csv.Sniffer().sniff(sample)
                 return dialect.delimiter
             except csv.Error:
-                logger.warning("デリミタの自動判定に失敗しました。カンマをデフォルト値として使用します。")
+                if self.on_warn is not None:
+                    self.on_warn("デリミタの自動判定に失敗しました。カンマをデフォルト値として使用します。")
         return ","
 
     def _detect_has_header(self, file_path: str) -> bool:
@@ -305,12 +318,13 @@ class CSVReader(ReaderProtocol):
         if self.has_header is not None:
             return self.has_header
 
-        sample = _read_sniffer_sample(file_path)
+        sample = _read_sniffer_sample(file_path, on_warn=self.on_warn)
         if sample:
             try:
                 return csv.Sniffer().has_header(sample)
             except csv.Error:
-                logger.warning("ヘッダーの自動判定に失敗しました。ヘッダーありとして扱います。")
+                if self.on_warn is not None:
+                    self.on_warn("ヘッダーの自動判定に失敗しました。ヘッダーありとして扱います。")
         return True
 
     def _cast_row(
