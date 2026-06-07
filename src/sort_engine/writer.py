@@ -106,55 +106,10 @@ class SQLiteWriter(WriterProtocol):
                 # イテレータが空の場合は何もせず終了
                 return
 
-            header_cols: list[str] = []
-            first_data_row: list[Any] | None = None
+            header_cols, first_data_row = self._resolve_columns_and_data(first_row, rows)
 
-            # カラム名の決定
-            if self.columns is not None:
-                header_cols = self.columns
-                if self.has_header:
-                    # カラム指定があり、先頭行がヘッダーの場合は読み捨てる
-                    try:
-                        first_data_row = next(rows)
-                    except StopIteration:
-                        pass
-                else:
-                    first_data_row = first_row
-            else:
-                if self.has_header:
-                    header_cols = [str(col) for col in first_row]
-                    try:
-                        first_data_row = next(rows)
-                    except StopIteration:
-                        pass
-                else:
-                    header_cols = [f"col_{i}" for i in range(len(first_row))]
-                    first_data_row = first_row
-
-            # 既存テーブルがある場合はスキーマ（カラム数・カラム名）の整合性を検証
-            cursor = conn.cursor()
             escaped_table_name = self._escape_identifier(self.table_name)
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (self.table_name,))
-            table_exists = cursor.fetchone() is not None
-
-            if table_exists:
-                cursor.execute(f'PRAGMA table_info("{escaped_table_name}");')
-                existing_cols = cursor.fetchall()
-                existing_col_names = [col[1] for col in existing_cols]
-
-                if len(existing_col_names) != len(header_cols):
-                    raise ValueError(
-                        f"スキーマ不一致: テーブル '{self.table_name}' は {len(existing_col_names)} 個のカラムを持っていますが、 "
-                        f"入力データは {len(header_cols)} 個です。"
-                    )
-
-                existing_col_names_lower = [name.lower() for name in existing_col_names]
-                header_cols_lower = [name.lower() for name in header_cols]
-                if existing_col_names_lower != header_cols_lower:
-                    raise ValueError(
-                        f"スキーマ不一致: テーブル '{self.table_name}' のカラム名が一致しません。 "
-                        f"期待値: {existing_col_names}, 指定値: {header_cols}。"
-                    )
+            table_exists = self._validate_existing_schema(conn, escaped_table_name, header_cols)
 
             # ヘッダー行のみでデータが空だった場合
             if first_data_row is None:
@@ -167,35 +122,102 @@ class SQLiteWriter(WriterProtocol):
 
             with conn:
                 if not table_exists:
-                    # スキーマ（カラム型定義）の決定
-                    col_defs_list = []
-                    if self.column_types is not None:
-                        for col_name in header_cols:
-                            col_type = self.column_types.get(col_name, "TEXT")
-                            col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
-                    else:
-                        col_types = [self._map_to_sqlite_type(val) for val in first_data_row]
-                        for col_name, col_type in zip(header_cols, col_types):
-                            col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
-                    col_defs = ", ".join(col_defs_list)
-
-                    # テーブル作成
+                    col_defs = self._determine_schema(header_cols, first_data_row)
                     conn.execute(f'CREATE TABLE IF NOT EXISTS "{escaped_table_name}" ({col_defs});')
 
-                # パラメータSQL
-                placeholders = ", ".join(["?"] * len(header_cols))
-                insert_sql = f'INSERT INTO "{escaped_table_name}" VALUES ({placeholders});'
-
-                # バッファリングとインサート
-                batch = [self._serialize_row(first_data_row)]
-
-                for row in rows:
-                    batch.append(self._serialize_row(row))
-                    if len(batch) >= self.batch_size:
-                        conn.executemany(insert_sql, batch)
-                        batch.clear()
-
-                if batch:
-                    conn.executemany(insert_sql, batch)
+                self._insert_rows(conn, escaped_table_name, header_cols, first_data_row, rows)
         finally:
             conn.close()
+
+    def _resolve_columns_and_data(
+        self, first_row: list[Any], rows: Iterator[list[Any]]
+    ) -> tuple[list[str], list[Any] | None]:
+        """カラム名と最初のデータ行を決定します。"""
+        header_cols: list[str] = []
+        first_data_row: list[Any] | None = None
+
+        if self.columns is not None:
+            header_cols = self.columns
+            if self.has_header:
+                try:
+                    first_data_row = next(rows)
+                except StopIteration:
+                    pass
+            else:
+                first_data_row = first_row
+        else:
+            if self.has_header:
+                header_cols = [str(col) for col in first_row]
+                try:
+                    first_data_row = next(rows)
+                except StopIteration:
+                    pass
+            else:
+                header_cols = [f"col_{i}" for i in range(len(first_row))]
+                first_data_row = first_row
+
+        return header_cols, first_data_row
+
+    def _validate_existing_schema(self, conn: sqlite3.Connection, escaped_table_name: str, header_cols: list[str]) -> bool:
+        """既存のテーブルスキーマと整合性を検証します。テーブルが存在する場合は True を返します。"""
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (self.table_name,))
+        if cursor.fetchone() is None:
+            return False
+
+        cursor.execute(f'PRAGMA table_info("{escaped_table_name}");')
+        existing_cols = cursor.fetchall()
+        existing_col_names = [col[1] for col in existing_cols]
+
+        if len(existing_col_names) != len(header_cols):
+            raise ValueError(
+                f"スキーマ不一致: テーブル '{self.table_name}' は {len(existing_col_names)} 個のカラムを持っていますが、 "
+                f"入力データは {len(header_cols)} 個です。"
+            )
+
+        existing_col_names_lower = [name.lower() for name in existing_col_names]
+        header_cols_lower = [name.lower() for name in header_cols]
+        if existing_col_names_lower != header_cols_lower:
+            raise ValueError(
+                f"スキーマ不一致: テーブル '{self.table_name}' のカラム名が一致しません。 "
+                f"期待値: {existing_col_names}, 指定値: {header_cols}。"
+            )
+
+        return True
+
+    def _determine_schema(self, header_cols: list[str], first_data_row: list[Any] | None) -> str:
+        """カラム型定義文字列を生成します。"""
+        col_defs_list = []
+        if self.column_types is not None:
+            for col_name in header_cols:
+                col_type = self.column_types.get(col_name, "TEXT")
+                col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
+        else:
+            data_row = first_data_row if first_data_row is not None else []
+            col_types = [self._map_to_sqlite_type(val) for val in data_row]
+            for col_name, col_type in zip(header_cols, col_types):
+                col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
+        return ", ".join(col_defs_list)
+
+    def _insert_rows(
+        self,
+        conn: sqlite3.Connection,
+        escaped_table_name: str,
+        header_cols: list[str],
+        first_data_row: list[Any],
+        rows: Iterator[list[Any]],
+    ) -> None:
+        """データを一括挿入します。"""
+        placeholders = ", ".join(["?"] * len(header_cols))
+        insert_sql = f'INSERT INTO "{escaped_table_name}" VALUES ({placeholders});'
+
+        batch = [self._serialize_row(first_data_row)]
+
+        for row in rows:
+            batch.append(self._serialize_row(row))
+            if len(batch) >= self.batch_size:
+                conn.executemany(insert_sql, batch)
+                batch.clear()
+
+        if batch:
+            conn.executemany(insert_sql, batch)
