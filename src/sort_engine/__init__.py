@@ -1,7 +1,7 @@
 from .interface import ReaderProtocol, FilterProtocol, SorterProtocol, WriterProtocol
 from .engine import SortEngine
 from .reader import CSVReader
-from .filter import GrepFilter, UniqueFilter
+from .filter import UniqueFilter
 from .sorter import ExternalMergeSorter
 from .writer import CSVWriter, SQLiteWriter
 
@@ -12,7 +12,6 @@ __all__ = [
     "WriterProtocol",
     "SortEngine",
     "CSVReader",
-    "GrepFilter",
     "UniqueFilter",
     "ExternalMergeSorter",
     "CSVWriter",

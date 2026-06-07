@@ -5,7 +5,7 @@ from sort_engine import (
     ReaderProtocol,
     SorterProtocol,
     WriterProtocol,
-    GrepFilter,
+    UniqueFilter,
 )
 
 # テスト用の簡易モック実装
@@ -45,21 +45,22 @@ def test_sort_engine_pipeline() -> None:
         ["3", "Charlie", "Developer"],
         ["1", "Alice", "Manager"],
         ["2", "Bob", "Developer"],
+        ["2", "Duplicate Bob", "Developer"], # ID:2 の重複
     ]
 
     reader = MockReader(input_data)
     writer = MockWriter()
     sorter = MockSorter()
 
-    # Roleが "Developer" の行のみを抽出するフィルタ
-    grep_filter = GrepFilter(column_index=2, pattern="Developer")
+    # ID（インデックス0）で重複排除するフィルタ
+    unique_filter = UniqueFilter(key_indices=[0])
 
     # ID（インデックス0）を整数値としてソートする設定
     engine = SortEngine(
         reader=reader,
         sorter=sorter,
         writer=writer,
-        filter_chain=[grep_filter]
+        filter_chain=[unique_filter]
     )
 
     # 実行
@@ -70,8 +71,9 @@ def test_sort_engine_pipeline() -> None:
     )
 
     # 期待される結果:
-    # 1. 'Manager' である Alice は除外される
-    # 2. 'Developer' である Bob(ID:2) と Charlie(ID:3) が残り、ID順にソートされる
-    assert len(writer.written_data) == 2
-    assert writer.written_data[0] == ["2", "Bob", "Developer"]
-    assert writer.written_data[1] == ["3", "Charlie", "Developer"]
+    # 1. 重複するID:2 の "Duplicate Bob" は除外される
+    # 2. 残ったID 1, 2, 3 のデータがソートされて書き出される
+    assert len(writer.written_data) == 3
+    assert writer.written_data[0] == ["1", "Alice", "Manager"]
+    assert writer.written_data[1] == ["2", "Bob", "Developer"]
+    assert writer.written_data[2] == ["3", "Charlie", "Developer"]
