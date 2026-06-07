@@ -321,8 +321,8 @@ def test_sqlite_writer_schema_mismatch_validation() -> None:
         ]
         with pytest.raises(ValueError) as exc_info:
             writer2.write(iter(data_bad_count), temp_db_path)
-        assert "Schema mismatch" in str(exc_info.value)
-        assert "columns" in str(exc_info.value)
+        assert "スキーマ不一致" in str(exc_info.value)
+        assert "カラム" in str(exc_info.value)
 
         # 3. カラム名は異なるが、数が同じデータを追記しようとして ValueError が送出されること
         data_bad_names = [
@@ -331,8 +331,8 @@ def test_sqlite_writer_schema_mismatch_validation() -> None:
         ]
         with pytest.raises(ValueError) as exc_info:
             writer2.write(iter(data_bad_names), temp_db_path)
-        assert "Schema mismatch" in str(exc_info.value)
-        assert "column names do not match" in str(exc_info.value)
+        assert "スキーマ不一致" in str(exc_info.value)
+        assert "カラム名が一致しません" in str(exc_info.value)
 
     finally:
         if os.path.exists(temp_db_path):

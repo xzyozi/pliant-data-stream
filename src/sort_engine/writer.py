@@ -74,7 +74,12 @@ class SQLiteWriter(WriterProtocol):
         return identifier.replace('"', '""')
 
     def _map_to_sqlite_type(self, val: Any) -> str:
-        """Pythonのオブジェクト型からSQLiteの型名へマッピングします。"""
+        """Pythonのオブジェクト型からSQLiteの型名へマッピングします。
+
+        注意: column_types が指定されていない場合、最初のデータ行の値の型に基づいて
+        SQLite のカラム型を動的に決定します。先頭行の特定カラムが None や空文字列などの場合は、
+        TEXT 型が適用されます。より厳密な型定義が必要な場合は column_types を明示的に渡してください。
+        """
         if isinstance(val, int):
             return "INTEGER"
         elif isinstance(val, float):
@@ -139,16 +144,16 @@ class SQLiteWriter(WriterProtocol):
 
                 if len(existing_col_names) != len(header_cols):
                     raise ValueError(
-                        f"Schema mismatch: Table '{self.table_name}' has {len(existing_col_names)} columns, "
-                        f"but input data has {len(header_cols)} columns."
+                        f"スキーマ不一致: テーブル '{self.table_name}' は {len(existing_col_names)} 個のカラムを持っていますが、 "
+                        f"入力データは {len(header_cols)} 個です。"
                     )
 
                 existing_col_names_lower = [name.lower() for name in existing_col_names]
                 header_cols_lower = [name.lower() for name in header_cols]
                 if existing_col_names_lower != header_cols_lower:
                     raise ValueError(
-                        f"Schema mismatch: Table '{self.table_name}' column names do not match. "
-                        f"Expected: {existing_col_names}, Given: {header_cols}."
+                        f"スキーマ不一致: テーブル '{self.table_name}' のカラム名が一致しません。 "
+                        f"期待値: {existing_col_names}, 指定値: {header_cols}。"
                     )
 
             # ヘッダー行のみでデータが空だった場合
