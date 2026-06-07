@@ -78,12 +78,12 @@ classDiagram
 
 ## 🧱 主要コンポーネントの役割
 
-### 1. `SortEngine` ([src/sort_engine/engine.py](file:///c:/Users/xzyoi/Desktop/python/pliant-data-stream/src/sort_engine/engine.py))
+### 1. `SortEngine` ([src/sort_engine/engine.py](../../src/sort_engine/engine.py))
 パイプライン処理の実行制御を行うコアエンジンです。
 - **依存関係注入 (DI)**: 初期化時に各プロトコル（`Reader`, `Filter`, `Sorter`, `Writer`）を実装したインスタンスを受け取ります。
 - **ストリーム実行**: データをジェネレータ（ストリーム）で流し、メモリ消費量を抑えながら「読み込み ➔ フィルタリング ➔ ソート ➔ 書き出し」のパイプラインを実行します。
 
-### 2. インターフェース定義 ([src/sort_engine/interface.py](file:///c:/Users/xzyoi/Desktop/python/pliant-data-stream/src/sort_engine/interface.py))
+### 2. インターフェース定義 ([src/sort_engine/interface.py](../../src/sort_engine/interface.py))
 `typing.Protocol` を用いて、各層が満たすべき共通のインターフェースを定義しています。
 
 * **`ReaderProtocol`**: ファイルを読み込み、パースして行データ（リスト）のストリームを返します。
@@ -93,13 +93,13 @@ classDiagram
 
 ### 3. 具象実装クラス
 
-* **`CSVReader`** ([src/sort_engine/reader.py](file:///c:/Users/xzyoi/Desktop/python/pliant-data-stream/src/sort_engine/reader.py))
+* **`CSVReader`** ([src/sort_engine/reader.py](../../src/sort_engine/reader.py))
   - `ReaderProtocol` に準拠。デリミタ自動判定（将来実装）および行パースを担当します。
-* **`UniqueFilter`** ([src/sort_engine/filter.py](file:///c:/Users/xzyoi/Desktop/python/pliant-data-stream/src/sort_engine/filter.py))
+* **`UniqueFilter`** ([src/sort_engine/filter.py](../../src/sort_engine/filter.py))
   - `FilterProtocol` に準拠。指定されたキーカラム群に基づいて重複データを排除します。
-* **`ExternalMergeSorter`** ([src/sort_engine/sorter.py](file:///c:/Users/xzyoi/Desktop/python/pliant-data-stream/src/sort_engine/sorter.py))
+* **`ExternalMergeSorter`** ([src/sort_engine/sorter.py](../../src/sort_engine/sorter.py))
   - `SorterProtocol` に準拠。一時ファイル書き出しとマージを組み合わせる外部マージソートを担当します。
-* **`CSVWriter` / `SQLiteWriter`** ([src/sort_engine/writer.py](file:///c:/Users/xzyoi/Desktop/python/pliant-data-stream/src/sort_engine/writer.py))
+* **`CSVWriter` / `SQLiteWriter`** ([src/sort_engine/writer.py](../../src/sort_engine/writer.py))
   - `WriterProtocol` に準拠。CSV出力、またはSQLiteデータベースへのインポート・永続化を担当します。
 
 ---
