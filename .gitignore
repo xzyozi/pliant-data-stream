@@ -219,3 +219,6 @@ __marimo__/
 
 # gemini
 .gemini/
+
+# GUI Settings
+settings.json
