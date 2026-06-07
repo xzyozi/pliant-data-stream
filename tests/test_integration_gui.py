@@ -521,3 +521,46 @@ def test_gui_sort_pipeline_dir(tk_root: tk.Tk, temp_settings_file: str) -> None:
             assert reader[2] == ["4", "85"]
 
 
+def test_gui_column_detection(tk_root: tk.Tk, temp_settings_file: str) -> None:
+    """入力ファイル/フォルダ選択時やヘッダー設定変更時のカラム検出機能を検証する。"""
+    app = PliantApplication(tk_root)
+    app.settings_manager.settings_path = temp_settings_file
+    main_win = MainWindow(tk_root, app)
+
+    # 1. 一時的なCSVファイル作成
+    with tempfile.NamedTemporaryFile(suffix=".csv", mode="w", delete=False, newline="") as f_in:
+        writer = csv.writer(f_in)
+        writer.writerow(["id", "name", "age"])
+        writer.writerow(["1", "Alice", "20"])
+        input_file_path = f_in.name
+
+    # 2. 一時的なディレクトリとCSVファイル作成
+    with tempfile.TemporaryDirectory() as temp_dir:
+        dir_csv = os.path.join(temp_dir, "temp_data.csv")
+        with open(dir_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["colA", "colB"])
+            writer.writerow(["x", "y"])
+
+        try:
+            # ファイル単体で has_header=True の場合のカラム検出
+            main_win.has_header_var.set(True)
+            main_win.input_path_var.set(input_file_path)
+            # トレースで検出が走るはず
+            assert main_win.detected_columns == ["id", "name", "age"]
+
+            # has_header=False に切り替えた場合のカラム検出（インデックス表示）
+            main_win.has_header_var.set(False)
+            assert main_win.detected_columns == ["0", "1", "2"]
+
+            # ディレクトリを指定した場合のカラム検出（フォルダ内の最初のファイル colA, colB）
+            main_win.has_header_var.set(True)
+            main_win.input_path_var.set(temp_dir)
+            assert main_win.detected_columns == ["colA", "colB"]
+
+        finally:
+            if os.path.exists(input_file_path):
+                os.remove(input_file_path)
+
+
+

@@ -1,3 +1,4 @@
+import csv
 from datetime import datetime
 import logging
 import os
@@ -78,6 +79,13 @@ class MainWindow(ttk.Frame):
         # 出力設定
         self.output_format_var = tk.StringVar(value="CSV")
         self.sqlite_table_name_var = tk.StringVar(value="sorted_data")
+
+        # 検出されたカラム
+        self.detected_columns: list[str] = []
+
+        # 入力パスやヘッダー扱いの変更時にカラム自動検出を実行するためのトレース設定
+        self.input_path_var.trace_add("write", lambda *args: self._on_input_path_changed())
+        self.has_header_var.trace_add("write", lambda *args: self._on_input_path_changed())
 
     def _build_ui(self) -> None:
         # メニューバーの設定
@@ -264,6 +272,53 @@ class MainWindow(ttk.Frame):
     def _on_header_toggled(self) -> None:
         pass
 
+    def _detect_columns(self, input_path: str) -> None:
+        """入力パスからカラム名を自動検出して self.detected_columns を更新します。"""
+        self.detected_columns = []
+        if not input_path:
+            return
+
+        target_file = None
+        if os.path.isdir(input_path):
+            try:
+                for entry_name in os.listdir(input_path):
+                    full_in = os.path.join(input_path, entry_name)
+                    if os.path.isfile(full_in) and entry_name.lower().endswith((".csv", ".tsv")):
+                        target_file = full_in
+                        break
+            except Exception as e:
+                logger.warning(f"フォルダ内のファイル一覧取得中にエラーが発生しました: {e}")
+        elif os.path.isfile(input_path):
+            target_file = input_path
+
+        if not target_file:
+            return
+
+        try:
+            has_header = self.has_header_var.get()
+            reader = CSVReader(has_header=has_header)
+            delim, actual_has_header = reader._detect_properties(target_file)
+
+            with open(target_file, mode="r", encoding="utf-8", newline="") as f:
+                csv_reader = csv.reader(f, delimiter=delim)
+                first_row = next(csv_reader)
+
+            if actual_has_header:
+                self.detected_columns = [col.strip() for col in first_row if col.strip()]
+                if not self.detected_columns:
+                    self.detected_columns = [str(i) for i in range(len(first_row))]
+            else:
+                self.detected_columns = [str(i) for i in range(len(first_row))]
+
+            logger.info(f"カラム名を検出しました: {self.detected_columns}")
+        except Exception as e:
+            logger.warning(f"カラム名の自動検出中にエラーが発生しました: {e}")
+
+    def _on_input_path_changed(self) -> None:
+        path = self.input_path_var.get().strip()
+        if path and os.path.exists(path):
+            self._detect_columns(path)
+
     def _on_sync_toggled(self) -> None:
         if self.auto_sync_path_var.get():
             self._auto_set_output_path(self.input_path_var.get())
@@ -286,7 +341,11 @@ class MainWindow(ttk.Frame):
         self.app.theme_manager.apply_theme_to_toplevel(dialog)
 
         ttk.Label(dialog, text="カラム名または列インデックス:").pack(pady=5)
-        entry = ttk.Entry(dialog, width=30)
+        col_var = tk.StringVar()
+        entry = ttk.Combobox(dialog, textvariable=col_var, width=28)
+        if self.detected_columns:
+            entry["values"] = self.detected_columns
+            entry.current(0)
         entry.pack(pady=5)
 
         ttk.Label(dialog, text="データ型:").pack(pady=5)
@@ -301,7 +360,7 @@ class MainWindow(ttk.Frame):
         order_combo.pack(pady=5)
 
         def save() -> None:
-            col = entry.get().strip()
+            col = col_var.get().strip()
             if not col:
                 messagebox.showerror("エラー", "カラム名を入力してください。")
                 return
@@ -520,6 +579,7 @@ class MainWindow(ttk.Frame):
         reader = CSVReader(has_header=has_header)
         sorter = ExternalMergeSorter(chunk_size=chunk_size)
 
+        writer: Any
         if output_format == "SQLite":
             gui_table_name = self.sqlite_table_name_var.get().strip()
             is_dir_input = os.path.isdir(self.input_path_var.get().strip())
