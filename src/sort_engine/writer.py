@@ -158,7 +158,9 @@ class SQLiteWriter(WriterProtocol):
 
         return header_cols, first_data_row
 
-    def _validate_existing_schema(self, conn: sqlite3.Connection, escaped_table_name: str, header_cols: list[str]) -> bool:
+    def _validate_existing_schema(
+        self, conn: sqlite3.Connection, escaped_table_name: str, header_cols: list[str]
+    ) -> bool:
         """既存のテーブルスキーマと整合性を検証します。テーブルが存在する場合は True を返します。"""
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (self.table_name,))
@@ -171,7 +173,8 @@ class SQLiteWriter(WriterProtocol):
 
         if len(existing_col_names) != len(header_cols):
             raise ValueError(
-                f"スキーマ不一致: テーブル '{self.table_name}' は {len(existing_col_names)} 個のカラムを持っていますが、 "
+                f"スキーマ不一致: テーブル '{self.table_name}' は "
+                f"{len(existing_col_names)} 個のカラムを持っていますが、"
                 f"入力データは {len(header_cols)} 個です。"
             )
 
