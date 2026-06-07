@@ -97,8 +97,8 @@ def infer_schema(samples: List[List[str]]) -> List[Callable[[str], Any]]:
 
     for col_idx in range(num_cols):
         inferred_types = []
-        date_formats = {}
-        datetime_formats = {}
+        date_formats: dict[str, int] = {}
+        datetime_formats: dict[str, int] = {}
 
         for row in samples:
             if col_idx >= len(row):
@@ -140,10 +140,10 @@ def infer_schema(samples: List[List[str]]) -> List[Callable[[str], Any]]:
         elif unique_types == {float} or unique_types == {int, float}:
             casters.append(make_caster(float))
         elif unique_types == {datetime}:
-            best_fmt = max(datetime_formats, key=datetime_formats.get) if datetime_formats else None
+            best_fmt = max(datetime_formats, key=lambda k: datetime_formats[k]) if datetime_formats else None
             casters.append(make_caster(datetime, best_fmt))
         elif unique_types == {date}:
-            best_fmt = max(date_formats, key=date_formats.get) if date_formats else None
+            best_fmt = max(date_formats, key=lambda k: date_formats[k]) if date_formats else None
             casters.append(make_caster(date, best_fmt))
         else:
             casters.append(make_caster(str))
