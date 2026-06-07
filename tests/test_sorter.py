@@ -1,7 +1,9 @@
 import os
 import tempfile
+import tracemalloc
 from collections.abc import Iterator
 from datetime import date, datetime
+from typing import Any
 import pytest
 from sort_engine import ExternalMergeSorter
 from sort_engine.sorter import load_custom_key_func
@@ -99,9 +101,9 @@ def custom_key(row):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = list(sorter.sort(iter(data), key_func=key_func, temp_dir=temp_dir))
 
-        assert result[0] == [2, "Bob"]     # 3
-        assert result[1] == [3, "Zack"]    # 4
-        assert result[2] == [1, "Alice"]   # 5
+        assert result[0] == [2, "Bob"]  # 3
+        assert result[1] == [3, "Zack"]  # 4
+        assert result[2] == [1, "Alice"]  # 5
     finally:
         if os.path.exists(script_path):
             os.remove(script_path)
@@ -136,6 +138,7 @@ def test_load_custom_key_func_errors() -> None:
 
 def test_external_merge_sorter_cleanup_on_exception() -> None:
     """ソートイテレーションの処理中に例外が発生した場合、生成された一時ファイルがクリーンアップされることの検証"""
+
     # 意図的にイテレーションの途中で ValueError を投げるジェネレータ
     def broken_rows() -> Iterator[list[int]]:
         yield [1, 2]
@@ -151,3 +154,57 @@ def test_external_merge_sorter_cleanup_on_exception() -> None:
         # エラー発生後に一時ファイルが削除されていること
         remaining_files = os.listdir(temp_dir)
         assert len(remaining_files) == 0
+
+
+def test_external_merge_sorter_cascading_merge() -> None:
+    """max_open_files 制限を小さくし、多段マージ（Cascading Merge）が正常に機能するかの境界値検証"""
+    # チャンクサイズ 2、同時オープンファイル上限 2 に対して 9 件のデータ
+    # チャンクは 5 つ生成される（一時ファイル 5 個）
+    # 5 > 2 なので、多段マージがトリガーされる
+    data = [
+        [9, "I"],
+        [8, "H"],
+        [7, "G"],
+        [6, "F"],
+        [5, "E"],
+        [4, "D"],
+        [3, "C"],
+        [2, "B"],
+        [1, "A"],
+    ]
+
+    sorter = ExternalMergeSorter(chunk_size=2, max_open_files=2)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        result = list(sorter.sort(iter(data), key_func=lambda x: x[0], temp_dir=temp_dir))
+
+        # 一時ファイルが中間ファイルを含めてすべて綺麗に削除されていることを検証
+        remaining_files = os.listdir(temp_dir)
+        assert len(remaining_files) == 0
+
+    assert len(result) == 9
+    assert result[0] == [1, "A"]
+    assert result[4] == [5, "E"]
+    assert result[8] == [9, "I"]
+
+
+def test_external_merge_sorter_memory_leak() -> None:
+    """巨大データをソートした際、メモリ使用量のピーク値が一定以下に抑えられていることの検証"""
+    # 5000 行のデータを chunk_size = 50 でソートする（一時ファイル 100 個）
+    # メモリ上には一度に 50 行しか乗らないため、メモリピークは小さく保たれる
+    data = [[i % 100, f"data-{i}"] for i in range(5000)]
+
+    tracemalloc.start()
+    try:
+        sorter = ExternalMergeSorter(chunk_size=50)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = list(sorter.sort(iter(data), key_func=lambda x: x[0], temp_dir=temp_dir))
+
+            assert len(result) == 5000
+
+            # メモリピーク値の取得 (current, peak)
+            _, peak = tracemalloc.get_traced_memory()
+
+            # メモリピーク値が 5MB 以下に収まっていることを確認
+            assert peak < 5 * 1024 * 1024, f"メモリ使用量のピークが大きすぎます: {peak} bytes"
+    finally:
+        tracemalloc.stop()

@@ -1,3 +1,4 @@
+import atexit
 from collections.abc import Callable, Iterator
 import heapq
 import importlib.util
@@ -8,6 +9,23 @@ import tempfile
 from typing import Any
 
 from .interface import SorterProtocol
+
+# 作成された一時ファイルを追跡し、強制終了時に確実に削除するためのグローバルセット
+_created_temp_files: set[str] = set()
+
+
+def _cleanup_all_temp_files() -> None:
+    """プロセス終了時に未削除の一時ファイルを確実に削除する atexit フック"""
+    for file_path in list(_created_temp_files):
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except OSError:
+            pass
+    _created_temp_files.clear()
+
+
+atexit.register(_cleanup_all_temp_files)
 
 
 def load_custom_key_func(script_path: str, function_name: str) -> Callable[[list[Any]], Any]:
@@ -57,12 +75,14 @@ def load_custom_key_func(script_path: str, function_name: str) -> Callable[[list
 class ExternalMergeSorter(SorterProtocol):
     """大容量データ用の外部マージソート（External Merge Sort）を実行するクラス"""
 
-    def __init__(self, chunk_size: int = 100000) -> None:
+    def __init__(self, chunk_size: int = 100000, max_open_files: int = 200) -> None:
         """
         Args:
             chunk_size: メモリに保持する最大行数。これを超えるたびに一時ファイルへ書き出します。
+            max_open_files: 同時にオープンを許可する最大一時ファイル数（ディスクリプタ上限回避用）。
         """
         self.chunk_size = chunk_size
+        self.max_open_files = max_open_files
 
     def sort(
         self, rows: Iterator[list[Any]], key_func: Callable[[list[Any]], Any], temp_dir: str
@@ -81,17 +101,57 @@ class ExternalMergeSorter(SorterProtocol):
             list[Any]: ソート済みの行データ。
         """
         temp_files: list[str] = []
-        buffer: list[list[Any]] = []
+        buffer: list[tuple[Any, list[Any]]] = []
+
+        # 2. 一時ファイルからデータを読み込み、自動的にファイルを削除するジェネレータ定義
+        # 多段マージで複数回 append (dump) されたファイルに対応するため、EOFまでループロードする
+        def _read_temp_file(file_path: str) -> Iterator[tuple[Any, list[Any]]]:
+            try:
+                with open(file_path, "rb") as f:
+                    while True:
+                        try:
+                            chunk = pickle.load(f)
+                            for item in chunk:
+                                yield item
+                        except EOFError:
+                            break
+            finally:
+                # 読み込み完了時、またはエラー発生時に一時ファイルを確実に削除
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                except OSError:
+                    pass
+                _created_temp_files.discard(file_path)
+
+        # マージ中の中間結果ストリームを一時ファイルに Spill するヘルパー
+        def _spill_stream_to_file(stream: Iterator[tuple[Any, list[Any]]]) -> str:
+            temp_file = tempfile.NamedTemporaryFile(dir=temp_dir, suffix=".pkl", delete=False)
+            temp_file.close()
+            _created_temp_files.add(temp_file.name)
+
+            buf: list[tuple[Any, list[Any]]] = []
+            with open(temp_file.name, "wb") as f:
+                for item in stream:
+                    buf.append(item)
+                    if len(buf) >= self.chunk_size:
+                        pickle.dump(buf, f)
+                        buf.clear()
+                if buf:
+                    pickle.dump(buf, f)
+            return temp_file.name
 
         try:
-            # 1. チャンク分割と一時ファイルへの退避 (Spilling)
+            # 1. シュワルツ変換の適用とSpill (一時ファイルへの退避)
+            # 読み込み時に一度だけ key_func を適用して (score, row) に変換
             for row in rows:
-                buffer.append(row)
+                score = key_func(row)
+                buffer.append((score, row))
                 if len(buffer) >= self.chunk_size:
-                    buffer.sort(key=key_func)
-                    # delete=False で作成し、手動で削除管理を行う
+                    buffer.sort(key=lambda x: x[0])
                     temp_file = tempfile.NamedTemporaryFile(dir=temp_dir, suffix=".pkl", delete=False)
                     temp_file.close()
+                    _created_temp_files.add(temp_file.name)
                     with open(temp_file.name, "wb") as f:
                         pickle.dump(buffer, f)
                     temp_files.append(temp_file.name)
@@ -99,9 +159,10 @@ class ExternalMergeSorter(SorterProtocol):
 
             # 残ったバッファをソートして退避
             if buffer:
-                buffer.sort(key=key_func)
+                buffer.sort(key=lambda x: x[0])
                 temp_file = tempfile.NamedTemporaryFile(dir=temp_dir, suffix=".pkl", delete=False)
                 temp_file.close()
+                _created_temp_files.add(temp_file.name)
                 with open(temp_file.name, "wb") as f:
                     pickle.dump(buffer, f)
                 temp_files.append(temp_file.name)
@@ -110,31 +171,32 @@ class ExternalMergeSorter(SorterProtocol):
             if not temp_files:
                 return
 
-            # 2. 一時ファイルからデータを読み込み、自動的にファイルを削除するジェネレータ定義
-            def _read_temp_file(file_path: str) -> Iterator[list[Any]]:
-                try:
-                    with open(file_path, "rb") as f:
-                        chunk = pickle.load(f)
-                    for r in chunk:
-                        yield r
-                finally:
-                    # 読み込み完了時、またはエラー発生時に一時ファイルを確実に削除
-                    try:
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
-                    except OSError:
-                        pass
+            # 2. 多段マージ (Cascading Merge)
+            # 一時ファイル数が max_open_files を超えている間、段階的にマージして中間ファイルを生成
+            while len(temp_files) > self.max_open_files:
+                merge_batch = temp_files[: self.max_open_files]
+                temp_files = temp_files[self.max_open_files :]
 
-            # 3. heapq.merge による K-way マージソート
-            streams = [_read_temp_file(tf) for tf in temp_files]
-            yield from heapq.merge(*streams, key=key_func)
+                # 部分的なマージストリームを作成
+                batch_streams = [_read_temp_file(tf) for tf in merge_batch]
+                merged_batch = heapq.merge(*batch_streams, key=lambda x: x[0])
+
+                # 新しい中間一時ファイルにマージストリームを書き出す
+                new_temp_file = _spill_stream_to_file(merged_batch)
+                temp_files.append(new_temp_file)
+
+            # 3. 最終マージと出力 (シュワルツ変換の解除)
+            final_streams = [_read_temp_file(tf) for tf in temp_files]
+            for _, row in heapq.merge(*final_streams, key=lambda x: x[0]):
+                yield row
 
         except Exception:
-            # エラー発生時のクリーンアップ処理
-            for tf in temp_files:
+            # エラー発生時の確実なクリーンアップ処理
+            for tf in list(temp_files):
                 try:
                     if os.path.exists(tf):
                         os.remove(tf)
                 except OSError:
                     pass
+                _created_temp_files.discard(tf)
             raise
