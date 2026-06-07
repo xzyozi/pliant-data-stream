@@ -197,3 +197,39 @@ def test_sqlite_writer_empty_data() -> None:
     finally:
         if os.path.exists(temp_db_path):
             os.remove(temp_db_path)
+
+
+def test_sqlite_writer_pragma_settings() -> None:
+    """PRAGMA設定が正しくデータベースに適用されることを検証"""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as temp_db:
+        temp_db_path = temp_db.name
+
+    try:
+        # カスタムPRAGMAを指定
+        writer = SQLiteWriter(
+            table_name="test_pragma",
+            has_header=False,
+            journal_mode="DELETE",
+            synchronous="FULL"
+        )
+        data = [[1, "test"]]
+        writer.write(iter(data), temp_db_path)
+
+        conn = sqlite3.connect(temp_db_path)
+        cursor = conn.cursor()
+
+        # journal_mode は DELETE になるはず
+        cursor.execute("PRAGMA journal_mode;")
+        journal_mode = cursor.fetchone()[0]
+        assert journal_mode.upper() == "DELETE"
+
+        # synchronous は FULL (2) になるはず
+        cursor.execute("PRAGMA synchronous;")
+        sync = cursor.fetchone()[0]
+        assert sync == 2  # 2 = FULL
+
+        conn.close()
+    finally:
+        if os.path.exists(temp_db_path):
+            os.remove(temp_db_path)
+

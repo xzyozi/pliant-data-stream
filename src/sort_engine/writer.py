@@ -34,6 +34,8 @@ class SQLiteWriter(WriterProtocol):
         columns: list[str] | None = None,
         has_header: bool = True,
         batch_size: int = 5000,
+        journal_mode: str = "WAL",
+        synchronous: str = "NORMAL",
     ) -> None:
         """
         Args:
@@ -41,11 +43,15 @@ class SQLiteWriter(WriterProtocol):
             columns: カラム名指定。省略時は has_header=True の場合に1行目をヘッダーとして扱います。
             has_header: 渡されるイテレータの1行目がヘッダー行であるか。
             batch_size: バルクインサートを実行する単位行数。
+            journal_mode: SQLiteのジャーナルモード（デフォルトは WAL）。
+            synchronous: SQLiteの同期モード（デフォルトは NORMAL）。
         """
         self.table_name = table_name
         self.columns = columns
         self.has_header = has_header
         self.batch_size = batch_size
+        self.journal_mode = journal_mode
+        self.synchronous = synchronous
 
     def _map_to_sqlite_type(self, val: Any) -> str:
         """Pythonのオブジェクト型からSQLiteの型名へマッピングします。"""
@@ -64,9 +70,9 @@ class SQLiteWriter(WriterProtocol):
         """SQLiteデータベース（ファイルまたはインメモリ）にデータを永続化します。"""
         conn = sqlite3.connect(dest_path)
         try:
-            # バルク挿入の高速化PRAGMAの適用
-            conn.execute("PRAGMA synchronous = OFF;")
-            conn.execute("PRAGMA journal_mode = MEMORY;")
+            # バルク挿入の高速化・安全化PRAGMAの適用
+            conn.execute(f"PRAGMA synchronous = {self.synchronous};")
+            conn.execute(f"PRAGMA journal_mode = {self.journal_mode};")
 
             # 最初の要素を取得
             try:
