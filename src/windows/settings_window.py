@@ -1,5 +1,5 @@
 """
-reusable_gui.windows.settings_window
+windows.settings_window
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 スキーマ駆動の汎用設定ウィンドウ。
 
@@ -16,12 +16,12 @@ from collections import defaultdict
 from tkinter import filedialog, font, messagebox, simpledialog, ttk
 from typing import TYPE_CHECKING, Any
 
-from reusable_gui.core.config import defaults as config
-from reusable_gui.core.config.schema import SettingField, WidgetType
+from core.config import defaults as config
+from core.config.schema import SettingField, WidgetType
 
 if TYPE_CHECKING:
-    from reusable_gui.core.bootstrap.base_application import BaseApplication
-    from reusable_gui.core.config.settings_manager import BaseSettingsManager
+    from core.bootstrap.base_application import BaseApplication
+    from core.config.settings_manager import BaseSettingsManager
 
 logger = logging.getLogger(__name__)
 

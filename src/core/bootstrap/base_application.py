@@ -7,8 +7,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from reusable_gui.core.events.event_dispatcher import EventDispatcher
-from reusable_gui.core.config.settings_manager import BaseSettingsManager
+from core.events.event_dispatcher import EventDispatcher
+from core.config.settings_manager import BaseSettingsManager
 
 
 class ApplicationState(Enum):

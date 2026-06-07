@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from reusable_gui.core.config.schema import SettingField
+from core.config.schema import SettingField
 
 
 class BaseSettingsManager(ABC):

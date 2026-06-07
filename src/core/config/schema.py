@@ -1,5 +1,5 @@
 """
-reusable_gui.core.config.schema
+core.config.schema
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 設定画面のスキーマ型定義モジュール。
 
