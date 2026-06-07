@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 # プロジェクト固有の情報（ここだけ書き換えればOK）
-name = "my-awesome-project"  
+name = "pliant-data-stream"
 version = "0.1.0"
-description = "A modern Python project template"
+description = "A robust data stream and sorting pipeline library in Python"
 readme = "README.md"
 requires-python = ">=3.10"
 
