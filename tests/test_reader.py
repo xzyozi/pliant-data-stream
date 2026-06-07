@@ -64,7 +64,7 @@ def test_auto_cast_value_date() -> None:
 
 def test_auto_cast_value_str_fallback() -> None:
     assert auto_cast_value("Hello") == "Hello"
-    assert auto_cast_value("  ") == "  "
+    assert auto_cast_value("  ") == ""  # 空文字列（トリミング適用）
     assert auto_cast_value("") == ""
 
 
@@ -83,10 +83,10 @@ def test_csv_reader_auto_detect_csv() -> None:
         reader = CSVReader(auto_cast=False)  # delimiter=None (自動判定)
         rows = list(reader.read(temp_file_path))
 
-        assert len(rows) == 3
-        assert rows[0] == ["ID", "Name", "Role"]
-        assert rows[1] == ["1", "Alice", "Manager"]
-        assert rows[2] == ["2", "Bob", "Developer"]
+        assert reader.header == ["ID", "Name", "Role"]
+        assert len(rows) == 2
+        assert rows[0] == ["1", "Alice", "Manager"]
+        assert rows[1] == ["2", "Bob", "Developer"]
     finally:
         os.remove(temp_file_path)
 
@@ -101,10 +101,10 @@ def test_csv_reader_auto_detect_tsv() -> None:
         reader = CSVReader(auto_cast=False)  # delimiter=None (自動判定)
         rows = list(reader.read(temp_file_path))
 
-        assert len(rows) == 3
-        assert rows[0] == ["ID", "Name", "Role"]
-        assert rows[1] == ["1", "Alice", "Manager"]
-        assert rows[2] == ["2", "Bob", "Developer"]
+        assert reader.header == ["ID", "Name", "Role"]
+        assert len(rows) == 2
+        assert rows[0] == ["1", "Alice", "Manager"]
+        assert rows[1] == ["2", "Bob", "Developer"]
     finally:
         os.remove(temp_file_path)
 
@@ -132,16 +132,16 @@ def test_csv_reader_secure_parse() -> None:
         reader = CSVReader(delimiter=",", auto_cast=False)
         rows = list(reader.read(temp_file_path))
 
-        assert len(rows) == 5
+        assert reader.header == ["ID", "Name", "Description"]
+        assert len(rows) == 4
 
         for idx, row in enumerate(rows):
             assert len(row) == 3, f"Row {idx} has invalid column count: {row}"
 
-        assert rows[0] == ["ID", "Name", "Description"]
-        assert rows[1] == ["1", "Alice", "Line1\nLine2"]
-        assert rows[2] == ["2", "Bob", "This is , a comma"]
-        assert rows[3] == ["3", "Charlie", 'He said, "Hello World!"']
-        assert rows[4] == ["4", "David", 'Mixed: , \n and "quotes"']
+        assert rows[0] == ["1", "Alice", "Line1\nLine2"]
+        assert rows[1] == ["2", "Bob", "This is , a comma"]
+        assert rows[2] == ["3", "Charlie", 'He said, "Hello World!"']
+        assert rows[3] == ["4", "David", 'Mixed: , \n and "quotes"']
     finally:
         os.remove(temp_file_path)
 
@@ -167,11 +167,10 @@ def test_csv_reader_auto_cast_integration() -> None:
         reader = CSVReader(auto_cast=True, infer_rows=2, enable_timestamp_cast=True)
         rows = list(reader.read(temp_file_path))
 
-        assert len(rows) == 4
-        # ヘッダーは文字列のまま
-        assert rows[0] == ["ID", "Score", "Date", "TimestampSec", "TimestampMs", "Name"]
-        # 各カラムが正しくキャストされていること
-        assert rows[1] == [
+        assert reader.header == ["ID", "Score", "Date", "TimestampSec", "TimestampMs", "Name"]
+        assert len(rows) == 3
+        # 各カラムが正しくキャストされていること（ヘッダー行はrowsに含まれない）
+        assert rows[0] == [
             1,
             92.5,
             date(2026, 6, 1),
@@ -179,7 +178,7 @@ def test_csv_reader_auto_cast_integration() -> None:
             datetime.fromtimestamp(1717751200),
             "Alice",
         ]
-        assert rows[2] == [
+        assert rows[1] == [
             2,
             88.0,
             date(2026, 6, 2),
@@ -187,7 +186,7 @@ def test_csv_reader_auto_cast_integration() -> None:
             datetime.fromtimestamp(1717751260),
             "Bob",
         ]
-        assert rows[3] == [
+        assert rows[2] == [
             3,
             95.1,
             date(2026, 6, 3),
@@ -215,10 +214,40 @@ def test_csv_reader_auto_cast_timestamp_disabled_by_default() -> None:
         reader = CSVReader(has_header=True, auto_cast=True, infer_rows=2)
         rows = list(reader.read(temp_file_path))
 
-        assert rows[0] == ["ID", "BusinessID", "Name"]
+        assert reader.header == ["ID", "BusinessID", "Name"]
+        assert len(rows) == 2
         # BusinessID は datetime ではなく int のままであること
-        assert isinstance(rows[1][1], int)
-        assert rows[1][1] == 1500000000
+        assert isinstance(rows[0][1], int)
+        assert rows[0][1] == 1500000000
+    finally:
+        os.remove(temp_file_path)
+
+
+def test_csv_reader_mixed_date_datetime_infers_datetime() -> None:
+    """date と datetime が同一カラムに混在する場合、datetime に推論されること"""
+    content = (
+        "ID,Timestamp\n"
+        "1,2026-06-01\n"
+        "2,2026-06-02 12:00:00\n"
+        "3,2026-06-03\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8", newline="") as temp_file:
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    try:
+        reader = CSVReader(has_header=True, auto_cast=True, infer_rows=3)
+        rows = list(reader.read(temp_file_path))
+
+        assert reader.header == ["ID", "Timestamp"]
+        assert len(rows) == 3
+        # すべて datetime オブジェクトになっているはず
+        assert isinstance(rows[0][1], datetime)
+        assert isinstance(rows[1][1], datetime)
+        assert isinstance(rows[2][1], datetime)
+        assert rows[0][1] == datetime(2026, 6, 1, 0, 0, 0)
+        assert rows[1][1] == datetime(2026, 6, 2, 12, 0, 0)
+        assert rows[2][1] == datetime(2026, 6, 3, 0, 0, 0)
     finally:
         os.remove(temp_file_path)
 
@@ -234,7 +263,7 @@ def test_csv_reader_empty_file() -> None:
 
     try:
         reader = CSVReader()
-        with pytest.raises(ValueError, match="Empty file"):
+        with pytest.raises(ValueError, match="ファイルが空です"):
             list(reader.read(temp_file_path))
     finally:
         os.remove(temp_file_path)
@@ -249,7 +278,7 @@ def test_csv_reader_column_mismatch() -> None:
 
     try:
         reader = CSVReader()
-        with pytest.raises(ValueError, match="Column count mismatch at line 3"):
+        with pytest.raises(ValueError, match="列数が一致しません"):
             list(reader.read(temp_file_path))
     finally:
         os.remove(temp_file_path)
@@ -280,7 +309,7 @@ def test_csv_reader_cast_failure() -> None:
 
     try:
         reader = CSVReader(has_header=True, auto_cast=True, infer_rows=2)
-        with pytest.raises(ValueError, match="Type cast error at line 4"):
+        with pytest.raises(ValueError, match="型キャストエラーが発生しました"):
             list(reader.read(temp_file_path))
     finally:
         os.remove(temp_file_path)
@@ -306,7 +335,7 @@ def test_csv_reader_no_header() -> None:
         reader = CSVReader(has_header=False, auto_cast=True, infer_rows=2)
         rows = list(reader.read(temp_file_path))
 
-        # 1行目からデータとして扱われるため、ヘッダー行は出力されず、すべてキャストされたデータ行になる
+        assert reader.header is None
         assert len(rows) == 3
         assert rows[0] == [1, 92.5, date(2026, 6, 1)]
         assert rows[1] == [2, 88.0, date(2026, 6, 2)]
@@ -325,8 +354,10 @@ def test_csv_reader_auto_detect_has_header() -> None:
     try:
         reader = CSVReader(has_header=None)  # 自動判定
         rows = list(reader.read(temp_file_path_h))
-        # 1行目がヘッダー（文字列）としてそのまま残っているか
-        assert rows[0] == ["ID", "Score", "Date"]
-        assert rows[1] == [1, 92.5, date(2026, 6, 1)]
+
+        assert reader.header == ["ID", "Score", "Date"]
+        assert len(rows) == 2
+        assert rows[0] == [1, 92.5, date(2026, 6, 1)]
+        assert rows[1] == [2, 88.0, date(2026, 6, 2)]
     finally:
         os.remove(temp_file_path_h)
