@@ -1,40 +1,57 @@
 import csv
 from datetime import date, datetime
+import itertools
+import logging
 from typing import Any, Callable, Iterator, List, Optional, Union
 
 from .interface import ReaderProtocol
 
+logger = logging.getLogger(__name__)
+
 # 型定義
 CastType = Union[int, float, datetime, date, str]
 
+# タイムスタンプ判定範囲 (2001-09-09 〜 2065-01-24)
+_TS_SEC_MIN = 1_000_000_000
+_TS_SEC_MAX = 3_000_000_000
+_TS_MS_MIN = 1_000_000_000_000
+_TS_MS_MAX = 3_000_000_000_000
 
-def auto_cast_value(val: str) -> CastType:
+# デリミタ判定用のサンプル行数
+_SNIFFER_SAMPLE_LINES = 20
+
+
+def auto_cast_value(val: str, *, enable_timestamp_cast: bool = True) -> CastType:
     """文字列値を最適なデータ型（int, float, datetime, date, str）に変換します。
 
     変換を試みる順序:
-    1. タイムスタンプ (秒・ミリ秒)
+    1. タイムスタンプ (秒・ミリ秒)  ※ enable_timestamp_cast=True の場合のみ
     2. 整数 (int)
     3. 浮動小数点数 (float)
     4. 日時 (datetime)
     5. 日付 (date)
     6. 元の文字列 (str)
+
+    Args:
+        val: 変換対象の文字列。
+        enable_timestamp_cast: Trueの場合、10桁(秒)・13桁(ミリ秒)の数値を
+            Unixタイムスタンプとしてdatetimeに変換します。デフォルトは ``True``。
+            業務IDや電話番号など10桁の数値が混在するデータではFalseを推奨します。
     """
     val_stripped = val.strip()
     if not val_stripped:
         return val  # 空文字列（欠損値）はそのまま返す
 
     # 1. タイムスタンプ (通算秒/ミリ秒)
-    # 誤検知を防ぐため、2001年〜2063年（10桁秒、13桁ミリ秒）の範囲に限定
-    try:
-        val_num = float(val_stripped)
-        # 10桁秒 (1000000000 <= x <= 3000000000)
-        if 1000000000 <= val_num <= 3000000000:
-            return datetime.fromtimestamp(val_num)
-        # 13桁ミリ秒 (1000000000000 <= x <= 3000000000000)
-        if 1000000000000 <= val_num <= 3000000000000:
-            return datetime.fromtimestamp(val_num / 1000.0)
-    except (ValueError, OverflowError, OSError):
-        pass
+    if enable_timestamp_cast:
+        try:
+            val_num = float(val_stripped)
+            if _TS_SEC_MIN <= val_num <= _TS_SEC_MAX:
+                return datetime.fromtimestamp(val_num)
+            if _TS_MS_MIN <= val_num <= _TS_MS_MAX:
+                return datetime.fromtimestamp(val_num / 1000.0)
+        except (ValueError, OverflowError, OSError):
+            pass
 
     # 2. 整数
     try:
@@ -48,7 +65,7 @@ def auto_cast_value(val: str) -> CastType:
     except ValueError:
         pass
 
-    # 4. 日時 (datetime)
+    # 4. 日時 (datetime) — strptime で主要フォーマットを試行した後、fromisoformat にフォールバック
     datetime_formats = (
         "%Y-%m-%d %H:%M:%S",
         "%Y/%m/%d %H:%M:%S",
@@ -71,6 +88,7 @@ def auto_cast_value(val: str) -> CastType:
         except ValueError:
             pass
 
+    # ISO 8601 フォールバック (Python 3.11+ では fromisoformat が大幅に拡張されており高速)
     try:
         return datetime.fromisoformat(val_stripped)
     except ValueError:
@@ -80,8 +98,20 @@ def auto_cast_value(val: str) -> CastType:
     return val
 
 
-def make_caster(target_type: type, format_str: Optional[str] = None) -> Callable[[str], Any]:
-    """指定された型に変換する関数を生成します。"""
+def make_caster(
+    target_type: type,
+    format_str: Optional[str] = None,
+    *,
+    enable_timestamp_cast: bool = True,
+) -> Callable[[str], Any]:
+    """指定された型に変換する関数を生成します。
+
+    Args:
+        target_type: 変換先の型 (int, float, datetime, date, str)。
+        format_str: datetime/date のフォーマット文字列。
+            ``"timestamp_sec"`` / ``"timestamp_ms"`` を指定するとUnixタイムスタンプとして扱います。
+        enable_timestamp_cast: タイムスタンプ変換を有効にするか（CSVReader の設定と連動します）。
+    """
     if target_type is int:
         return lambda x: int(x.strip())
     elif target_type is float:
@@ -94,6 +124,7 @@ def make_caster(target_type: type, format_str: Optional[str] = None) -> Callable
         elif format_str:
             return lambda x: datetime.strptime(x.strip(), format_str)
         else:
+            # fromisoformat は Python 3.11+ で大幅拡張済み。strptime より高速。
             return lambda x: datetime.fromisoformat(x.strip())
     elif target_type is date:
         if format_str:
@@ -105,8 +136,22 @@ def make_caster(target_type: type, format_str: Optional[str] = None) -> Callable
         return lambda x: x
 
 
-def infer_schema(samples: List[List[str]]) -> List[Callable[[str], Any]]:
-    """サンプルデータを元に、各カラムの最適なキャスト関数リストを作成します。"""
+def infer_schema(
+    samples: List[List[str]],
+    *,
+    enable_timestamp_cast: bool = True,
+) -> List[Callable[[str], Any]]:
+    """サンプルデータを元に、各カラムの最適なキャスト関数リストを作成します。
+
+    Args:
+        samples: 推論に使用する生文字列の行リスト。
+        enable_timestamp_cast: Unixタイムスタンプの推論を行うか。
+
+    Note:
+        ``infer_rows`` で指定した行数内で特定カラムがすべて空文字列だった場合、
+        そのカラムは ``str`` としてフォールバックされます。
+        欠損率が高いデータでは ``infer_rows=100`` 〜 ``1000`` 程度を推奨します。
+    """
     if not samples:
         return []
 
@@ -114,7 +159,7 @@ def infer_schema(samples: List[List[str]]) -> List[Callable[[str], Any]]:
     casters = []
 
     for col_idx in range(num_cols):
-        inferred_types = []
+        inferred_types: List[type] = []
         date_formats: dict[str, int] = {}
         datetime_formats: dict[str, int] = {}
 
@@ -125,38 +170,14 @@ def infer_schema(samples: List[List[str]]) -> List[Callable[[str], Any]]:
             if not val:
                 continue
 
-            casted = auto_cast_value(val)
+            casted = auto_cast_value(val, enable_timestamp_cast=enable_timestamp_cast)
             inferred_types.append(type(casted))
 
             # 日付/日時の場合は、どのフォーマットでパースできたかも集計しておく
             if isinstance(casted, datetime):
-                # タイムスタンプ（秒・ミリ秒）の識別
-                try:
-                    val_num = float(val)
-                    if 1000000000 <= val_num <= 3000000000:
-                        datetime_formats["timestamp_sec"] = datetime_formats.get("timestamp_sec", 0) + 1
-                        continue
-                    elif 1000000000000 <= val_num <= 3000000000000:
-                        datetime_formats["timestamp_ms"] = datetime_formats.get("timestamp_ms", 0) + 1
-                        continue
-                except ValueError:
-                    pass
-
-                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%I:%M:%S %p"):
-                    try:
-                        datetime.strptime(val, fmt)
-                        datetime_formats[fmt] = datetime_formats.get(fmt, 0) + 1
-                        break
-                    except ValueError:
-                        pass
+                _count_datetime_format(val, datetime_formats, enable_timestamp_cast)
             elif isinstance(casted, date):
-                for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
-                    try:
-                        datetime.strptime(val, fmt)
-                        date_formats[fmt] = date_formats.get(fmt, 0) + 1
-                        break
-                    except ValueError:
-                        pass
+                _count_date_format(val, date_formats)
 
         if not inferred_types:
             casters.append(make_caster(str))
@@ -166,19 +187,68 @@ def infer_schema(samples: List[List[str]]) -> List[Callable[[str], Any]]:
 
         # 最も強い型を判定
         if unique_types == {int}:
-            casters.append(make_caster(int))
+            casters.append(make_caster(int, enable_timestamp_cast=enable_timestamp_cast))
         elif unique_types == {float} or unique_types == {int, float}:
-            casters.append(make_caster(float))
+            casters.append(make_caster(float, enable_timestamp_cast=enable_timestamp_cast))
         elif unique_types == {datetime}:
             best_fmt = max(datetime_formats, key=lambda k: datetime_formats[k]) if datetime_formats else None
-            casters.append(make_caster(datetime, best_fmt))
+            casters.append(make_caster(datetime, best_fmt, enable_timestamp_cast=enable_timestamp_cast))
         elif unique_types == {date}:
             best_fmt = max(date_formats, key=lambda k: date_formats[k]) if date_formats else None
-            casters.append(make_caster(date, best_fmt))
+            casters.append(make_caster(date, best_fmt, enable_timestamp_cast=enable_timestamp_cast))
         else:
-            casters.append(make_caster(str))
+            casters.append(make_caster(str, enable_timestamp_cast=enable_timestamp_cast))
 
     return casters
+
+
+def _count_datetime_format(val: str, counters: dict[str, int], enable_timestamp_cast: bool) -> None:
+    """datetime 型と判定された値のフォーマットを集計します。"""
+    if enable_timestamp_cast:
+        try:
+            val_num = float(val)
+            if _TS_SEC_MIN <= val_num <= _TS_SEC_MAX:
+                counters["timestamp_sec"] = counters.get("timestamp_sec", 0) + 1
+                return
+            elif _TS_MS_MIN <= val_num <= _TS_MS_MAX:
+                counters["timestamp_ms"] = counters.get("timestamp_ms", 0) + 1
+                return
+        except ValueError:
+            pass
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%I:%M:%S %p"):
+        try:
+            datetime.strptime(val, fmt)
+            counters[fmt] = counters.get(fmt, 0) + 1
+            return
+        except ValueError:
+            pass
+
+
+def _count_date_format(val: str, counters: dict[str, int]) -> None:
+    """date 型と判定された値のフォーマットを集計します。"""
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            datetime.strptime(val, fmt)
+            counters[fmt] = counters.get(fmt, 0) + 1
+            return
+        except ValueError:
+            pass
+
+
+def _read_sniffer_sample(file_path: str, n_lines: int = _SNIFFER_SAMPLE_LINES) -> str:
+    """Sniffer に渡すサンプルを「完全な行」単位で取得します。
+
+    ``f.read(N)`` では行の途中で切れてダブルクオート内改行を誤認識する可能性があるため、
+    ``readline()`` を使って完全な行のみを収集します。
+    """
+    try:
+        with open(file_path, mode="r", encoding="utf-8", newline="") as f:
+            lines = [f.readline() for _ in range(n_lines)]
+        return "".join(lines)
+    except OSError as e:
+        logger.warning("サンプル取得に失敗しました: %s", e)
+        return ""
 
 
 class CSVReader(ReaderProtocol):
@@ -190,6 +260,7 @@ class CSVReader(ReaderProtocol):
         has_header: Optional[bool] = None,
         auto_cast: bool = True,
         infer_rows: int = 10,
+        enable_timestamp_cast: bool = False,
     ) -> None:
         """
         Args:
@@ -197,40 +268,49 @@ class CSVReader(ReaderProtocol):
             has_header: カラム名行（ヘッダー）の有無。Noneの場合はSnifferによる自動判定を試みます。
             auto_cast: Trueの場合、最初の infer_rows 行からスキーマを推論し、型変換を適用します。
             infer_rows: スキーマ推論に使用するデータの行数。
+                欠損値が多いデータや型の多様性が高いデータでは 100〜1000 程度を推奨します。
+            enable_timestamp_cast: Trueの場合、10桁(秒)/13桁(ミリ秒)の数値をUnixタイムスタンプ
+                として datetime に変換します。デフォルトは ``False``。
+                業務ID・電話番号など10桁の数値が混在するデータでは無効のまま使用してください。
         """
         self.delimiter = delimiter
         self.has_header = has_header
         self.auto_cast = auto_cast
         self.infer_rows = infer_rows
+        self.enable_timestamp_cast = enable_timestamp_cast
 
     def _detect_delimiter(self, file_path: str) -> str:
-        """指定のパスのファイルからデリミタを自動判定します。"""
+        """指定のパスのファイルからデリミタを自動判定します。
+
+        ``f.read(N)`` ではダブルクォートで囲まれた改行の途中でサンプルが切れる場合があるため、
+        完全な行単位でサンプルを収集して ``csv.Sniffer`` に渡します。
+        """
         if self.delimiter is not None:
             return self.delimiter
 
-        try:
-            with open(file_path, mode="r", encoding="utf-8", newline="") as f:
-                sample = f.read(4096)
-                if sample:
-                    dialect = csv.Sniffer().sniff(sample)
-                    return dialect.delimiter
-        except Exception:
-            pass
+        sample = _read_sniffer_sample(file_path)
+        if sample:
+            try:
+                dialect = csv.Sniffer().sniff(sample)
+                return dialect.delimiter
+            except csv.Error:
+                logger.warning("デリミタの自動判定に失敗しました。カンマをデフォルト値として使用します。")
         return ","
 
-    def _detect_has_header(self, file_path: str, delimiter: str) -> bool:
-        """指定のファイルにヘッダー（カラム名行）が存在するか判定します。"""
+    def _detect_has_header(self, file_path: str) -> bool:
+        """指定のファイルにヘッダー（カラム名行）が存在するか判定します。
+
+        ``csv.Sniffer`` を使って判定します。失敗した場合はヘッダーありとして扱います。
+        """
         if self.has_header is not None:
             return self.has_header
 
-        try:
-            with open(file_path, mode="r", encoding="utf-8", newline="") as f:
-                sample = f.read(4096)
-                if sample:
-                    return csv.Sniffer().has_header(sample)
-        except Exception:
-            pass
-        # 判定に失敗した場合は、一般的にヘッダーがあるものとして扱う
+        sample = _read_sniffer_sample(file_path)
+        if sample:
+            try:
+                return csv.Sniffer().has_header(sample)
+            except csv.Error:
+                logger.warning("ヘッダーの自動判定に失敗しました。ヘッダーありとして扱います。")
         return True
 
     def _cast_row(
@@ -261,7 +341,7 @@ class CSVReader(ReaderProtocol):
     def read(self, file_path: str) -> Iterator[List[Any]]:
         """ファイルを開いて行データを読み込みます。"""
         delim = self._detect_delimiter(file_path)
-        has_header = self._detect_has_header(file_path, delim)
+        has_header = self._detect_has_header(file_path)
 
         with open(file_path, mode="r", encoding="utf-8", newline="") as f:
             reader = csv.reader(f, delimiter=delim)
@@ -275,19 +355,14 @@ class CSVReader(ReaderProtocol):
             expected_cols = len(first_row)
 
             # データ読み出し用イテレータの準備
+            # itertools.chain を使うことで、内部ジェネレータ定義を排除しC実装レベルの速度で結合する
             if has_header:
                 yield first_row
                 start_line = 2
-                data_reader = reader
+                data_reader: Iterator[List[str]] = reader
             else:
                 start_line = 1
-
-                # 1行目と残りの行を連結
-                def _chain_first_row() -> Iterator[List[str]]:
-                    yield first_row
-                    yield from reader
-
-                data_reader = _chain_first_row()
+                data_reader = itertools.chain([first_row], reader)
 
             if not self.auto_cast:
                 for line_idx, row in enumerate(data_reader, start=start_line):
@@ -299,7 +374,7 @@ class CSVReader(ReaderProtocol):
                 return
 
             # スキーマ判定のため、最初の数行をバッファリング
-            sample_rows = []
+            sample_rows: List[tuple[int, List[str]]] = []
             for line_idx, row in enumerate(data_reader, start=start_line):
                 if len(row) != expected_cols:
                     raise ValueError(
@@ -311,7 +386,7 @@ class CSVReader(ReaderProtocol):
 
             # サンプル行を元にスキーマ判定
             raw_samples = [r for _, r in sample_rows]
-            casters = infer_schema(raw_samples)
+            casters = infer_schema(raw_samples, enable_timestamp_cast=self.enable_timestamp_cast)
 
             # バッファリングしたサンプル行をキャストして出力
             for line_idx, row in sample_rows:

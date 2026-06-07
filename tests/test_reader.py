@@ -5,39 +5,72 @@ import pytest
 from sort_engine import CSVReader, auto_cast_value
 
 
-def test_auto_cast_value() -> None:
-    # タイムスタンプの推論
-    # 秒ベース
-    assert isinstance(auto_cast_value("1717751200"), datetime)
-    assert auto_cast_value("1717751200") == datetime.fromtimestamp(1717751200)
-    # ミリ秒ベース
-    assert isinstance(auto_cast_value("1717751200000"), datetime)
-    assert auto_cast_value("1717751200000") == datetime.fromtimestamp(1717751200)
-    # 小数点付き秒ベース
-    assert isinstance(auto_cast_value("1717751200.5"), datetime)
-    assert auto_cast_value("1717751200.5") == datetime.fromtimestamp(1717751200.5)
+# ---------------------------------------------------------------------------
+# auto_cast_value のユニットテスト
+# ---------------------------------------------------------------------------
 
-    # 整数 (int) の推論
+
+def test_auto_cast_value_timestamp_enabled() -> None:
+    """enable_timestamp_cast=True の場合、10桁/13桁数値をdatetimeに変換する"""
+    # 秒ベース (10桁)
+    assert isinstance(auto_cast_value("1717751200", enable_timestamp_cast=True), datetime)
+    assert auto_cast_value("1717751200", enable_timestamp_cast=True) == datetime.fromtimestamp(1717751200)
+    # ミリ秒ベース (13桁)
+    assert isinstance(auto_cast_value("1717751200000", enable_timestamp_cast=True), datetime)
+    assert auto_cast_value("1717751200000", enable_timestamp_cast=True) == datetime.fromtimestamp(1717751200)
+    # 小数点付き秒ベース
+    assert isinstance(auto_cast_value("1717751200.5", enable_timestamp_cast=True), datetime)
+    assert auto_cast_value("1717751200.5", enable_timestamp_cast=True) == datetime.fromtimestamp(1717751200.5)
+
+
+def test_auto_cast_value_timestamp_disabled() -> None:
+    """enable_timestamp_cast=False を明示した場合、10桁数値は int/float に留まる"""
+    # 10桁の数値はタイムスタンプではなくintとして返る
+    result = auto_cast_value("1717751200", enable_timestamp_cast=False)
+    assert isinstance(result, int)
+    assert result == 1717751200
+
+    # 13桁の数値もintとして返る
+    result_ms = auto_cast_value("1717751200000", enable_timestamp_cast=False)
+    assert isinstance(result_ms, int)
+    assert result_ms == 1717751200000
+
+    # 小数点付きはfloat
+    result_float = auto_cast_value("1717751200.5", enable_timestamp_cast=False)
+    assert isinstance(result_float, float)
+    assert result_float == 1717751200.5
+
+
+def test_auto_cast_value_int() -> None:
     assert auto_cast_value("123") == 123
     assert auto_cast_value("-456") == -456
 
-    # 浮動小数点数 (float) の推論
+
+def test_auto_cast_value_float() -> None:
     assert auto_cast_value("12.34") == 12.34
     assert auto_cast_value("-0.001") == -0.001
 
-    # 日時 (datetime) の推論
+
+def test_auto_cast_value_datetime() -> None:
     assert isinstance(auto_cast_value("2026-06-07 12:00:00"), datetime)
     assert auto_cast_value("2026-06-07 15:30:00") == datetime(2026, 6, 7, 15, 30, 0)
 
-    # 日付 (date) の推論
+
+def test_auto_cast_value_date() -> None:
     assert isinstance(auto_cast_value("2026-06-07"), date)
     assert auto_cast_value("2026-06-07") == date(2026, 6, 7)
     assert auto_cast_value("2026/06/07") == date(2026, 6, 7)
 
-    # 文字列 (str) へのフォールバック
+
+def test_auto_cast_value_str_fallback() -> None:
     assert auto_cast_value("Hello") == "Hello"
     assert auto_cast_value("  ") == "  "
     assert auto_cast_value("") == ""
+
+
+# ---------------------------------------------------------------------------
+# CSVReader のデリミタ自動判定テスト
+# ---------------------------------------------------------------------------
 
 
 def test_csv_reader_auto_detect_csv() -> None:
@@ -76,12 +109,17 @@ def test_csv_reader_auto_detect_tsv() -> None:
         os.remove(temp_file_path)
 
 
+# ---------------------------------------------------------------------------
+# セキュアパーステスト（改行・カンマ・エスケープクォート）
+# ---------------------------------------------------------------------------
+
+
 def test_csv_reader_secure_parse() -> None:
     content = (
         "ID,Name,Description\n"
         '1,Alice,"Line1\nLine2"\n'
         '2,Bob,"This is , a comma"\n'
-        '3,Charlie,"He said, ""Hello World!"""\n'
+        '3,Charlie,"He said, ""Hello World!""\"\n'
         '4,David,"Mixed: , \n and ""quotes"""\n'
     )
     with tempfile.NamedTemporaryFile(
@@ -108,8 +146,13 @@ def test_csv_reader_secure_parse() -> None:
         os.remove(temp_file_path)
 
 
+# ---------------------------------------------------------------------------
+# 型推論の統合テスト
+# ---------------------------------------------------------------------------
+
+
 def test_csv_reader_auto_cast_integration() -> None:
-    # 最初の2行（infer_rows=2）で型判定を行い、以降の行をそれに沿ってキャストする
+    """enable_timestamp_cast=True を明示した場合、タイムスタンプがdatetimeに変換される"""
     content = (
         "ID,Score,Date,TimestampSec,TimestampMs,Name\n"
         "1,92.5,2026-06-01,1717751200,1717751200000,Alice\n"
@@ -121,7 +164,7 @@ def test_csv_reader_auto_cast_integration() -> None:
         temp_file_path = temp_file.name
 
     try:
-        reader = CSVReader(auto_cast=True, infer_rows=2)
+        reader = CSVReader(auto_cast=True, infer_rows=2, enable_timestamp_cast=True)
         rows = list(reader.read(temp_file_path))
 
         assert len(rows) == 4
@@ -154,6 +197,35 @@ def test_csv_reader_auto_cast_integration() -> None:
         ]
     finally:
         os.remove(temp_file_path)
+
+
+def test_csv_reader_auto_cast_timestamp_disabled_by_default() -> None:
+    """enable_timestamp_cast=False (デフォルト) では10桁数値はintのまま保持される"""
+    content = (
+        "ID,BusinessID,Name\n"
+        "1,1500000000,Alice\n"
+        "2,1600000000,Bob\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8", newline="") as temp_file:
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    try:
+        # デフォルト (enable_timestamp_cast=False)
+        reader = CSVReader(has_header=True, auto_cast=True, infer_rows=2)
+        rows = list(reader.read(temp_file_path))
+
+        assert rows[0] == ["ID", "BusinessID", "Name"]
+        # BusinessID は datetime ではなく int のままであること
+        assert isinstance(rows[1][1], int)
+        assert rows[1][1] == 1500000000
+    finally:
+        os.remove(temp_file_path)
+
+
+# ---------------------------------------------------------------------------
+# 異常系テスト
+# ---------------------------------------------------------------------------
 
 
 def test_csv_reader_empty_file() -> None:
@@ -214,6 +286,10 @@ def test_csv_reader_cast_failure() -> None:
         os.remove(temp_file_path)
 
 
+# ---------------------------------------------------------------------------
+# ヘッダー判定テスト
+# ---------------------------------------------------------------------------
+
 
 def test_csv_reader_no_header() -> None:
     # ヘッダーなし（has_header=False）の動作テスト
@@ -254,4 +330,3 @@ def test_csv_reader_auto_detect_has_header() -> None:
         assert rows[1] == [1, 92.5, date(2026, 6, 1)]
     finally:
         os.remove(temp_file_path_h)
-
