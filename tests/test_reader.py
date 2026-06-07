@@ -6,6 +6,17 @@ from sort_engine import CSVReader, auto_cast_value
 
 
 def test_auto_cast_value() -> None:
+    # タイムスタンプの推論
+    # 秒ベース
+    assert isinstance(auto_cast_value("1717751200"), datetime)
+    assert auto_cast_value("1717751200") == datetime.fromtimestamp(1717751200)
+    # ミリ秒ベース
+    assert isinstance(auto_cast_value("1717751200000"), datetime)
+    assert auto_cast_value("1717751200000") == datetime.fromtimestamp(1717751200)
+    # 小数点付き秒ベース
+    assert isinstance(auto_cast_value("1717751200.5"), datetime)
+    assert auto_cast_value("1717751200.5") == datetime.fromtimestamp(1717751200.5)
+
     # 整数 (int) の推論
     assert auto_cast_value("123") == 123
     assert auto_cast_value("-456") == -456
@@ -100,10 +111,10 @@ def test_csv_reader_secure_parse() -> None:
 def test_csv_reader_auto_cast_integration() -> None:
     # 最初の2行（infer_rows=2）で型判定を行い、以降の行をそれに沿ってキャストする
     content = (
-        "ID,Score,Date,Name\n"
-        "1,92.5,2026-06-01,Alice\n"
-        "2,88.0,2026-06-02,Bob\n"
-        "3,95.1,2026-06-03,Charlie\n"
+        "ID,Score,Date,TimestampSec,TimestampMs,Name\n"
+        "1,92.5,2026-06-01,1717751200,1717751200000,Alice\n"
+        "2,88.0,2026-06-02,1717751260,1717751260000,Bob\n"
+        "3,95.1,2026-06-03,1717751320,1717751320000,Charlie\n"
     )
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8", newline="") as temp_file:
         temp_file.write(content)
@@ -115,12 +126,32 @@ def test_csv_reader_auto_cast_integration() -> None:
 
         assert len(rows) == 4
         # ヘッダーは文字列のまま
-        assert rows[0] == ["ID", "Score", "Date", "Name"]
+        assert rows[0] == ["ID", "Score", "Date", "TimestampSec", "TimestampMs", "Name"]
         # 各カラムが正しくキャストされていること
-        # col0: int, col1: float, col2: date, col3: str
-        assert rows[1] == [1, 92.5, date(2026, 6, 1), "Alice"]
-        assert rows[2] == [2, 88.0, date(2026, 6, 2), "Bob"]
-        assert rows[3] == [3, 95.1, date(2026, 6, 3), "Charlie"]
+        assert rows[1] == [
+            1,
+            92.5,
+            date(2026, 6, 1),
+            datetime.fromtimestamp(1717751200),
+            datetime.fromtimestamp(1717751200),
+            "Alice",
+        ]
+        assert rows[2] == [
+            2,
+            88.0,
+            date(2026, 6, 2),
+            datetime.fromtimestamp(1717751260),
+            datetime.fromtimestamp(1717751260),
+            "Bob",
+        ]
+        assert rows[3] == [
+            3,
+            95.1,
+            date(2026, 6, 3),
+            datetime.fromtimestamp(1717751320),
+            datetime.fromtimestamp(1717751320),
+            "Charlie",
+        ]
     finally:
         os.remove(temp_file_path)
 

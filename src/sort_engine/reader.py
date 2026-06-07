@@ -12,29 +12,43 @@ def auto_cast_value(val: str) -> CastType:
     """文字列値を最適なデータ型（int, float, datetime, date, str）に変換します。
 
     変換を試みる順序:
-    1. 整数 (int)
-    2. 浮動小数点数 (float)
-    3. 日時 (datetime)
-    4. 日付 (date)
-    5. 元の文字列 (str)
+    1. 通算秒/タイムスタンプ (秒・ミリ秒)
+    2. 整数 (int)
+    3. 浮動小数点数 (float)
+    4. 日時 (datetime)
+    5. 日付 (date)
+    6. 元の文字列 (str)
     """
     val_stripped = val.strip()
     if not val_stripped:
         return val  # 空文字列（欠損値）はそのまま返す
 
-    # 1. 整数
+    # 1. タイムスタンプ (通算秒/ミリ秒)
+    # 誤検知を防ぐため、2001年〜2063年（10桁秒、13桁ミリ秒）の範囲に限定
+    try:
+        val_num = float(val_stripped)
+        # 10桁秒 (1000000000 <= x <= 3000000000)
+        if 1000000000 <= val_num <= 3000000000:
+            return datetime.fromtimestamp(val_num)
+        # 13桁ミリ秒 (1000000000000 <= x <= 3000000000000)
+        if 1000000000000 <= val_num <= 3000000000000:
+            return datetime.fromtimestamp(val_num / 1000.0)
+    except (ValueError, OverflowError, OSError):
+        pass
+
+    # 2. 整数
     try:
         return int(val_stripped)
     except ValueError:
         pass
 
-    # 2. 浮動小数点数
+    # 3. 浮動小数点数
     try:
         return float(val_stripped)
     except ValueError:
         pass
 
-    # 3. 日時 (datetime)
+    # 4. 日時 (datetime)
     datetime_formats = (
         "%Y-%m-%d %H:%M:%S",
         "%Y/%m/%d %H:%M:%S",
@@ -46,7 +60,7 @@ def auto_cast_value(val: str) -> CastType:
         except ValueError:
             pass
 
-    # 4. 日付 (date)
+    # 5. 日付 (date)
     date_formats = (
         "%Y-%m-%d",
         "%Y/%m/%d",
@@ -62,7 +76,7 @@ def auto_cast_value(val: str) -> CastType:
     except ValueError:
         pass
 
-    # 5. 文字列フォールバック
+    # 6. 文字列フォールバック
     return val
 
 
@@ -73,7 +87,11 @@ def make_caster(target_type: type, format_str: Optional[str] = None) -> Callable
     elif target_type is float:
         return lambda x: float(x.strip())
     elif target_type is datetime:
-        if format_str:
+        if format_str == "timestamp_sec":
+            return lambda x: datetime.fromtimestamp(float(x.strip()))
+        elif format_str == "timestamp_ms":
+            return lambda x: datetime.fromtimestamp(float(x.strip()) / 1000.0)
+        elif format_str:
             return lambda x: datetime.strptime(x.strip(), format_str)
         else:
             return lambda x: datetime.fromisoformat(x.strip())
@@ -112,6 +130,18 @@ def infer_schema(samples: List[List[str]]) -> List[Callable[[str], Any]]:
 
             # 日付/日時の場合は、どのフォーマットでパースできたかも集計しておく
             if isinstance(casted, datetime):
+                # タイムスタンプ（秒・ミリ秒）の識別
+                try:
+                    val_num = float(val)
+                    if 1000000000 <= val_num <= 3000000000:
+                        datetime_formats["timestamp_sec"] = datetime_formats.get("timestamp_sec", 0) + 1
+                        continue
+                    elif 1000000000000 <= val_num <= 3000000000000:
+                        datetime_formats["timestamp_ms"] = datetime_formats.get("timestamp_ms", 0) + 1
+                        continue
+                except ValueError:
+                    pass
+
                 for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%I:%M:%S %p"):
                     try:
                         datetime.strptime(val, fmt)
@@ -171,7 +201,7 @@ class CSVReader(ReaderProtocol):
         self.infer_rows = infer_rows
 
     def _detect_delimiter(self, file_path: str) -> str:
-        """指定のパスのファイルからデリミタを自動判定します。"""
+        """指定のパス of ファイルからデリミタを自動判定します。"""
         if self.delimiter is not None:
             return self.delimiter
 
@@ -200,6 +230,7 @@ class CSVReader(ReaderProtocol):
         for col_idx, val in enumerate(row):
             try:
                 if not val.strip():
+                    # 空文字列はそのまま
                     casted_row.append(val)
                 else:
                     casted_row.append(casters[col_idx](val))
