@@ -207,8 +207,51 @@ def test_csv_reader_cast_failure() -> None:
         temp_file_path = temp_file.name
 
     try:
-        reader = CSVReader(auto_cast=True, infer_rows=2)
+        reader = CSVReader(has_header=True, auto_cast=True, infer_rows=2)
         with pytest.raises(ValueError, match="Type cast error at line 4"):
             list(reader.read(temp_file_path))
     finally:
         os.remove(temp_file_path)
+
+
+
+def test_csv_reader_no_header() -> None:
+    # ヘッダーなし（has_header=False）の動作テスト
+    content = (
+        "1,92.5,2026-06-01\n"
+        "2,88.0,2026-06-02\n"
+        "3,95.1,2026-06-03\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8", newline="") as temp_file:
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    try:
+        reader = CSVReader(has_header=False, auto_cast=True, infer_rows=2)
+        rows = list(reader.read(temp_file_path))
+
+        # 1行目からデータとして扱われるため、ヘッダー行は出力されず、すべてキャストされたデータ行になる
+        assert len(rows) == 3
+        assert rows[0] == [1, 92.5, date(2026, 6, 1)]
+        assert rows[1] == [2, 88.0, date(2026, 6, 2)]
+        assert rows[2] == [3, 95.1, date(2026, 6, 3)]
+    finally:
+        os.remove(temp_file_path)
+
+
+def test_csv_reader_auto_detect_has_header() -> None:
+    # ヘッダーありデータの自動検知テスト
+    content_with_header = "ID,Score,Date\n1,92.5,2026-06-01\n2,88.0,2026-06-02\n"
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8", newline="") as temp_file:
+        temp_file.write(content_with_header)
+        temp_file_path_h = temp_file.name
+
+    try:
+        reader = CSVReader(has_header=None)  # 自動判定
+        rows = list(reader.read(temp_file_path_h))
+        # 1行目がヘッダー（文字列）としてそのまま残っているか
+        assert rows[0] == ["ID", "Score", "Date"]
+        assert rows[1] == [1, 92.5, date(2026, 6, 1)]
+    finally:
+        os.remove(temp_file_path_h)
+

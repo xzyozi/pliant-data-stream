@@ -12,7 +12,7 @@ def auto_cast_value(val: str) -> CastType:
     """文字列値を最適なデータ型（int, float, datetime, date, str）に変換します。
 
     変換を試みる順序:
-    1. 通算秒/タイムスタンプ (秒・ミリ秒)
+    1. タイムスタンプ (秒・ミリ秒)
     2. 整数 (int)
     3. 浮動小数点数 (float)
     4. 日時 (datetime)
@@ -187,21 +187,24 @@ class CSVReader(ReaderProtocol):
     def __init__(
         self,
         delimiter: Optional[str] = None,
+        has_header: Optional[bool] = None,
         auto_cast: bool = True,
         infer_rows: int = 10,
     ) -> None:
         """
         Args:
             delimiter: 区切り文字。Noneの場合は自動判定を試みます。
+            has_header: カラム名行（ヘッダー）の有無。Noneの場合はSnifferによる自動判定を試みます。
             auto_cast: Trueの場合、最初の infer_rows 行からスキーマを推論し、型変換を適用します。
             infer_rows: スキーマ推論に使用するデータの行数。
         """
         self.delimiter = delimiter
+        self.has_header = has_header
         self.auto_cast = auto_cast
         self.infer_rows = infer_rows
 
     def _detect_delimiter(self, file_path: str) -> str:
-        """指定のパス of ファイルからデリミタを自動判定します。"""
+        """指定のパスのファイルからデリミタを自動判定します。"""
         if self.delimiter is not None:
             return self.delimiter
 
@@ -214,6 +217,21 @@ class CSVReader(ReaderProtocol):
         except Exception:
             pass
         return ","
+
+    def _detect_has_header(self, file_path: str, delimiter: str) -> bool:
+        """指定のファイルにヘッダー（カラム名行）が存在するか判定します。"""
+        if self.has_header is not None:
+            return self.has_header
+
+        try:
+            with open(file_path, mode="r", encoding="utf-8", newline="") as f:
+                sample = f.read(4096)
+                if sample:
+                    return csv.Sniffer().has_header(sample)
+        except Exception:
+            pass
+        # 判定に失敗した場合は、一般的にヘッダーがあるものとして扱う
+        return True
 
     def _cast_row(
         self,
@@ -243,21 +261,36 @@ class CSVReader(ReaderProtocol):
     def read(self, file_path: str) -> Iterator[List[Any]]:
         """ファイルを開いて行データを読み込みます。"""
         delim = self._detect_delimiter(file_path)
+        has_header = self._detect_has_header(file_path, delim)
 
         with open(file_path, mode="r", encoding="utf-8", newline="") as f:
             reader = csv.reader(f, delimiter=delim)
 
-            # 空ファイルチェックとヘッダー取得
+            # 空ファイルチェック
             try:
-                header = next(reader)
+                first_row = next(reader)
             except StopIteration:
                 raise ValueError("Empty file")
 
-            yield header
-            expected_cols = len(header)
+            expected_cols = len(first_row)
+
+            # データ読み出し用イテレータの準備
+            if has_header:
+                yield first_row
+                start_line = 2
+                data_reader = reader
+            else:
+                start_line = 1
+
+                # 1行目と残りの行を連結
+                def _chain_first_row() -> Iterator[List[str]]:
+                    yield first_row
+                    yield from reader
+
+                data_reader = _chain_first_row()
 
             if not self.auto_cast:
-                for line_idx, row in enumerate(reader, start=2):
+                for line_idx, row in enumerate(data_reader, start=start_line):
                     if len(row) != expected_cols:
                         raise ValueError(
                             f"Column count mismatch at line {line_idx}: expected {expected_cols}, got {len(row)}"
@@ -267,7 +300,7 @@ class CSVReader(ReaderProtocol):
 
             # スキーマ判定のため、最初の数行をバッファリング
             sample_rows = []
-            for line_idx, row in enumerate(reader, start=2):
+            for line_idx, row in enumerate(data_reader, start=start_line):
                 if len(row) != expected_cols:
                     raise ValueError(
                         f"Column count mismatch at line {line_idx}: expected {expected_cols}, got {len(row)}"
@@ -285,6 +318,6 @@ class CSVReader(ReaderProtocol):
                 yield self._cast_row(row, casters, line_idx, expected_cols)
 
             # 残りの行を読み込みながらキャスト出力
-            start_line = 2 + len(sample_rows)
-            for line_idx, row in enumerate(reader, start=start_line):
+            next_start_line = start_line + len(sample_rows)
+            for line_idx, row in enumerate(data_reader, start=next_start_line):
                 yield self._cast_row(row, casters, line_idx, expected_cols)
