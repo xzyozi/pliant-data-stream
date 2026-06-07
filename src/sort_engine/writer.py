@@ -17,9 +17,9 @@ class CSVWriter(WriterProtocol):
         """
         self.delimiter = delimiter
 
-    def _serialize_row(self, row: list[Any]) -> list[Any]:
+    def _serialize_row(self, row: list[Any]) -> tuple[Any, ...]:
         """datetime や date などのオブジェクトを ISO 8601 形式の文字列に変換します。"""
-        return [item.isoformat() if isinstance(item, (datetime, date)) else item for item in row]
+        return tuple(item.isoformat() if isinstance(item, (datetime, date)) else item for item in row)
 
     def write(self, rows: Iterator[list[Any]], dest_path: str) -> None:
         """データをCSVファイルに書き込みます。"""
