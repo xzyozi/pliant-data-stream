@@ -29,7 +29,6 @@ class CSVWriter(WriterProtocol):
                 writer.writerow(self._serialize_row(row))
 
 
-
 class SQLiteWriter(WriterProtocol):
     """結果をSQLiteデータベースにインポート・永続化するライター"""
 
