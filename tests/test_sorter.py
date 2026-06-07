@@ -1,5 +1,6 @@
 import os
 import tempfile
+import threading
 import tracemalloc
 from collections.abc import Iterator
 from datetime import date, datetime
@@ -208,3 +209,53 @@ def test_external_merge_sorter_memory_leak() -> None:
             assert peak < 5 * 1024 * 1024, f"メモリ使用量のピークが大きすぎます: {peak} bytes"
     finally:
         tracemalloc.stop()
+
+
+def test_external_merge_sorter_mixed_types() -> None:
+    """異なる型（None, int, str等）が混在するキーのソート動作検証"""
+    data = [
+        [3, "Three"],
+        [None, "NoneVal"],
+        [1, "One"],
+        ["abc", "StringVal"],
+        [2, "Two"],
+    ]
+
+    sorter = ExternalMergeSorter(chunk_size=2)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        result = list(sorter.sort(iter(data), key_func=lambda x: x[0], temp_dir=temp_dir))
+
+    # クラッシュせずにソートでき、かつ期待するフォールバックルールに沿って順序付けられていること
+    assert len(result) == 5
+    # 設計上のフォールバック順: None -> int(1, 2, 3) -> str("abc")
+    assert result[0] == [None, "NoneVal"]
+    assert result[1] == [1, "One"]
+    assert result[2] == [2, "Two"]
+    assert result[3] == [3, "Three"]
+    assert result[4] == ["abc", "StringVal"]
+
+
+def test_external_merge_sorter_thread_safety() -> None:
+    """複数スレッドから同時に ExternalMergeSorter を実行した際のスレッドセーフティ検証"""
+    sorter = ExternalMergeSorter(chunk_size=2)
+    errors = []
+
+    def worker(worker_id: int) -> None:
+        data = [[i, f"w-{worker_id}-{i}"] for i in reversed(range(10))]
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                res = list(sorter.sort(iter(data), key_func=lambda x: x[0], temp_dir=temp_dir))
+                assert len(res) == 10
+                assert res[0][0] == 0
+                assert res[9][0] == 9
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # 並列実行中に例外クラッシュが発生していないこと
+    assert len(errors) == 0, f"並列実行中にエラーが発生しました: {errors}"
