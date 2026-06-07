@@ -170,22 +170,48 @@ class CSVReader(ReaderProtocol):
         self.auto_cast = auto_cast
         self.infer_rows = infer_rows
 
+    def _detect_delimiter(self, file_path: str) -> str:
+        """指定のパスのファイルからデリミタを自動判定します。"""
+        if self.delimiter is not None:
+            return self.delimiter
+
+        try:
+            with open(file_path, mode="r", encoding="utf-8", newline="") as f:
+                sample = f.read(4096)
+                if sample:
+                    dialect = csv.Sniffer().sniff(sample)
+                    return dialect.delimiter
+        except Exception:
+            pass
+        return ","
+
+    def _cast_row(
+        self,
+        row: List[str],
+        casters: List[Callable[[str], Any]],
+        line_idx: int,
+        expected_cols: int,
+    ) -> List[Any]:
+        """1行のデータを決定したスキーマに沿ってキャストします。"""
+        if len(row) != expected_cols:
+            raise ValueError(f"Column count mismatch at line {line_idx}: expected {expected_cols}, got {len(row)}")
+
+        casted_row = []
+        for col_idx, val in enumerate(row):
+            try:
+                if not val.strip():
+                    casted_row.append(val)
+                else:
+                    casted_row.append(casters[col_idx](val))
+            except ValueError as e:
+                raise ValueError(
+                    f"Type cast error at line {line_idx}, column {col_idx}: '{val}' cannot be converted. Details: {e}"
+                )
+        return casted_row
+
     def read(self, file_path: str) -> Iterator[List[Any]]:
         """ファイルを開いて行データを読み込みます。"""
-        delim = self.delimiter
-
-        # delimiterが指定されていない場合は csv.Sniffer による自動判定を試みる
-        if delim is None:
-            try:
-                with open(file_path, mode="r", encoding="utf-8", newline="") as f:
-                    sample = f.read(4096)
-                    if sample:
-                        dialect = csv.Sniffer().sniff(sample)
-                        delim = dialect.delimiter
-                    else:
-                        delim = ","
-            except Exception:
-                delim = ","
+        delim = self._detect_delimiter(file_path)
 
         with open(file_path, mode="r", encoding="utf-8", newline="") as f:
             reader = csv.reader(f, delimiter=delim)
@@ -225,41 +251,9 @@ class CSVReader(ReaderProtocol):
 
             # バッファリングしたサンプル行をキャストして出力
             for line_idx, row in sample_rows:
-                casted_row = []
-                for col_idx, val in enumerate(row):
-                    try:
-                        if not val.strip():
-                            # 空文字列はそのまま
-                            casted_row.append(val)
-                        else:
-                            casted_row.append(casters[col_idx](val))
-                    except ValueError as e:
-                        raise ValueError(
-                            f"Type cast error at line {line_idx}, "
-                            f"column {col_idx}: '{val}' cannot be converted. "
-                            f"Details: {e}"
-                        )
-                yield casted_row
+                yield self._cast_row(row, casters, line_idx, expected_cols)
 
             # 残りの行を読み込みながらキャスト出力
             start_line = 2 + len(sample_rows)
             for line_idx, row in enumerate(reader, start=start_line):
-                if len(row) != expected_cols:
-                    raise ValueError(
-                        f"Column count mismatch at line {line_idx}: expected {expected_cols}, got {len(row)}"
-                    )
-
-                casted_row = []
-                for col_idx, val in enumerate(row):
-                    try:
-                        if not val.strip():
-                            casted_row.append(val)
-                        else:
-                            casted_row.append(casters[col_idx](val))
-                    except ValueError as e:
-                        raise ValueError(
-                            f"Type cast error at line {line_idx}, "
-                            f"column {col_idx}: '{val}' cannot be converted. "
-                            f"Details: {e}"
-                        )
-                yield casted_row
+                yield self._cast_row(row, casters, line_idx, expected_cols)
