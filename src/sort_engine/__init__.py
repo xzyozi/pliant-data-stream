@@ -1,7 +1,7 @@
-from .interface import ReaderProtocol, FilterProtocol, SorterProtocol, WriterProtocol
 from .engine import SortEngine
-from .reader import CSVReader
 from .filter import UniqueFilter
+from .interface import FilterProtocol, ReaderProtocol, SorterProtocol, WriterProtocol
+from .reader import CSVReader
 from .sorter import ExternalMergeSorter
 from .writer import CSVWriter, SQLiteWriter
 

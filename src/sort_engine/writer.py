@@ -1,11 +1,13 @@
 import csv
 import sqlite3
 from typing import Iterator, List
+
 from .interface import WriterProtocol
+
 
 class CSVWriter(WriterProtocol):
     """結果をCSV（またはTSV）ファイルに出力するライター"""
-    
+
     def __init__(self, delimiter: str = ",") -> None:
         """
         Args:
@@ -23,7 +25,7 @@ class CSVWriter(WriterProtocol):
 
 class SQLiteWriter(WriterProtocol):
     """結果をSQLiteデータベースにインポート・永続化するライター"""
-    
+
     def __init__(self, table_name: str = "data_records") -> None:
         """
         Args:
@@ -36,8 +38,8 @@ class SQLiteWriter(WriterProtocol):
         # TODO: カラム定義の自動生成、インポート処理の実装
         # 骨組み実装のみ
         conn = sqlite3.connect(dest_path)
-        cursor = conn.cursor()
-        
+        conn.cursor()
+
         # 例としての仮処理
         try:
             # 実際の実装では最初の行などを元に動的にテーブルを作成します

@@ -1,16 +1,18 @@
 import os
 from typing import Any, Callable, List, Optional
-from .interface import ReaderProtocol, FilterProtocol, SorterProtocol, WriterProtocol
+
+from .interface import FilterProtocol, ReaderProtocol, SorterProtocol, WriterProtocol
+
 
 class SortEngine:
     """依存関係注入（DI）により各処理層を結合し、パイプラインを実行するソートエンジン"""
-    
+
     def __init__(
         self,
         reader: ReaderProtocol,
         sorter: SorterProtocol,
         writer: WriterProtocol,
-        filter_chain: Optional[List[FilterProtocol]] = None
+        filter_chain: Optional[List[FilterProtocol]] = None,
     ) -> None:
         """
         Args:
@@ -25,14 +27,10 @@ class SortEngine:
         self.filter_chain = filter_chain if filter_chain is not None else []
 
     def execute(
-        self,
-        input_path: str,
-        output_path: str,
-        key_func: Callable[[List[str]], Any],
-        temp_dir: Optional[str] = None
+        self, input_path: str, output_path: str, key_func: Callable[[List[str]], Any], temp_dir: Optional[str] = None
     ) -> None:
         """パイプライン処理を実行します。
-        
+
         Args:
             input_path: 入力ファイルのパス
             output_path: 出力ファイルのパス（またはDBの接続文字列等）

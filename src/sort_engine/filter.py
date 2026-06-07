@@ -1,10 +1,11 @@
 from typing import Iterator, List, Set, Tuple
+
 from .interface import FilterProtocol
 
 
 class UniqueFilter(FilterProtocol):
     """指定されたキーカラム群の値に基づいて、重複行を排除するクラス"""
-    
+
     def __init__(self, key_indices: List[int]) -> None:
         """
         Args:
