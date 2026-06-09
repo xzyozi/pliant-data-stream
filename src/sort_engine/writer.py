@@ -1,0 +1,226 @@
+from collections.abc import Iterator
+import csv
+from datetime import date, datetime
+import sqlite3
+from typing import Any
+
+from .interface import WriterProtocol
+
+
+class CSVWriter(WriterProtocol):
+    """結果をCSV（またはTSV）ファイルに出力するライター"""
+
+    def __init__(self, delimiter: str = ",") -> None:
+        """
+        Args:
+            delimiter: 区切り文字（デフォルトはカンマ）
+        """
+        self.delimiter = delimiter
+
+    def _serialize_row(self, row: list[Any]) -> tuple[Any, ...]:
+        """datetime や date などのオブジェクトを ISO 8601 形式の文字列に変換します。"""
+        return tuple(item.isoformat() if isinstance(item, (datetime, date)) else item for item in row)
+
+    def write(self, rows: Iterator[list[Any]], dest_path: str) -> None:
+        """データをCSVファイルに書き込みます。"""
+        with open(dest_path, mode="w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f, delimiter=self.delimiter)
+            for row in rows:
+                writer.writerow(self._serialize_row(row))
+
+
+class SQLiteWriter(WriterProtocol):
+    """結果をSQLiteデータベースにインポート・永続化するライター"""
+
+    def __init__(
+        self,
+        table_name: str = "data_records",
+        columns: list[str] | None = None,
+        has_header: bool = True,
+        batch_size: int = 5000,
+        journal_mode: str = "WAL",
+        synchronous: str = "NORMAL",
+        column_types: dict[str, str] | None = None,
+    ) -> None:
+        """
+        Args:
+            table_name: インポート先テーブル名
+            columns: カラム名指定。省略時は has_header=True の場合に1行目をヘッダーとして扱います。
+            has_header: 渡されるイテレータの1行目がヘッダー行であるか。
+            batch_size: バルクインサートを実行する単位行数。
+            journal_mode: SQLiteのジャーナルモード（デフォルトは WAL）。
+            synchronous: SQLiteの同期モード（デフォルトは NORMAL）。
+            column_types: カラム名から型定義文字列へのマッピング辞書。
+        """
+        valid_journal_modes = {"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF"}
+        valid_synchronous = {"OFF", "NORMAL", "FULL", "EXTRA", "0", "1", "2", "3"}
+
+        if journal_mode.upper() not in valid_journal_modes:
+            raise ValueError(f"無効な journal_mode が指定されました: {journal_mode}")
+
+        if str(synchronous).upper() not in valid_synchronous:
+            raise ValueError(f"無効な synchronous が指定されました: {synchronous}")
+
+        self.table_name = table_name
+        self.columns = columns
+        self.has_header = has_header
+        self.batch_size = batch_size
+        self.journal_mode = journal_mode
+        self.synchronous = synchronous
+        self.column_types = column_types
+
+    def _escape_identifier(self, identifier: str) -> str:
+        """SQL識別子（テーブル名やカラム名）内のダブルクォートをエスケープします。"""
+        return identifier.replace('"', '""')
+
+    def _map_to_sqlite_type(self, val: Any) -> str:
+        """Pythonのオブジェクト型からSQLiteの型名へマッピングします。
+
+        注意: column_types が指定されていない場合、最初のデータ行の値の型に基づいて
+        SQLite のカラム型を動的に決定します。先頭行の特定カラムが None や空文字列などの場合は、
+        TEXT 型が適用されます。より厳密な型定義が必要な場合は column_types を明示的に渡してください。
+        """
+        if isinstance(val, int):
+            return "INTEGER"
+        elif isinstance(val, float):
+            return "REAL"
+        else:
+            return "TEXT"
+
+    def _serialize_row(self, row: list[Any]) -> tuple[Any, ...]:
+        """挿入用に、datetime や date などのオブジェクトを文字列（ISO 8601）に変換します。"""
+        return tuple(item.isoformat() if isinstance(item, (datetime, date)) else item for item in row)
+
+    def write(self, rows: Iterator[list[Any]], dest_path: str) -> None:
+        """SQLiteデータベース（ファイルまたはインメモリ）にデータを永続化します。"""
+        conn = sqlite3.connect(dest_path)
+        try:
+            # バルク挿入の高速化・安全化PRAGMAの適用
+            conn.execute(f"PRAGMA synchronous = {self.synchronous};")
+            conn.execute(f"PRAGMA journal_mode = {self.journal_mode};")
+
+            # 最初の要素を取得
+            try:
+                first_row = next(rows)
+            except StopIteration:
+                # イテレータが空の場合は何もせず終了
+                return
+
+            header_cols, first_data_row = self._resolve_columns_and_data(first_row, rows)
+
+            escaped_table_name = self._escape_identifier(self.table_name)
+            table_exists = self._validate_existing_schema(conn, escaped_table_name, header_cols)
+
+            # ヘッダー行のみでデータが空だった場合
+            if first_data_row is None:
+                if table_exists:
+                    return
+                col_defs = ", ".join(f'"{self._escape_identifier(col)}" TEXT' for col in header_cols)
+                with conn:
+                    conn.execute(f'CREATE TABLE IF NOT EXISTS "{escaped_table_name}" ({col_defs});')
+                return
+
+            with conn:
+                if not table_exists:
+                    col_defs = self._determine_schema(header_cols, first_data_row)
+                    conn.execute(f'CREATE TABLE IF NOT EXISTS "{escaped_table_name}" ({col_defs});')
+
+                self._insert_rows(conn, escaped_table_name, header_cols, first_data_row, rows)
+        finally:
+            conn.close()
+
+    def _resolve_columns_and_data(
+        self, first_row: list[Any], rows: Iterator[list[Any]]
+    ) -> tuple[list[str], list[Any] | None]:
+        """カラム名と最初のデータ行を決定します。"""
+        header_cols: list[str] = []
+        first_data_row: list[Any] | None = None
+
+        if self.columns is not None:
+            header_cols = self.columns
+            if self.has_header:
+                try:
+                    first_data_row = next(rows)
+                except StopIteration:
+                    pass
+            else:
+                first_data_row = first_row
+        else:
+            if self.has_header:
+                header_cols = [str(col) for col in first_row]
+                try:
+                    first_data_row = next(rows)
+                except StopIteration:
+                    pass
+            else:
+                header_cols = [f"col_{i}" for i in range(len(first_row))]
+                first_data_row = first_row
+
+        return header_cols, first_data_row
+
+    def _validate_existing_schema(
+        self, conn: sqlite3.Connection, escaped_table_name: str, header_cols: list[str]
+    ) -> bool:
+        """既存のテーブルスキーマと整合性を検証します。テーブルが存在する場合は True を返します。"""
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (self.table_name,))
+        if cursor.fetchone() is None:
+            return False
+
+        cursor.execute(f'PRAGMA table_info("{escaped_table_name}");')
+        existing_cols = cursor.fetchall()
+        existing_col_names = [col[1] for col in existing_cols]
+
+        if len(existing_col_names) != len(header_cols):
+            raise ValueError(
+                f"スキーマ不一致: テーブル '{self.table_name}' は "
+                f"{len(existing_col_names)} 個のカラムを持っていますが、"
+                f"入力データは {len(header_cols)} 個です。"
+            )
+
+        existing_col_names_lower = [name.lower() for name in existing_col_names]
+        header_cols_lower = [name.lower() for name in header_cols]
+        if existing_col_names_lower != header_cols_lower:
+            raise ValueError(
+                f"スキーマ不一致: テーブル '{self.table_name}' のカラム名が一致しません。 "
+                f"期待値: {existing_col_names}, 指定値: {header_cols}。"
+            )
+
+        return True
+
+    def _determine_schema(self, header_cols: list[str], first_data_row: list[Any] | None) -> str:
+        """カラム型定義文字列を生成します。"""
+        col_defs_list = []
+        if self.column_types is not None:
+            for col_name in header_cols:
+                col_type = self.column_types.get(col_name, "TEXT")
+                col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
+        else:
+            data_row = first_data_row if first_data_row is not None else []
+            col_types = [self._map_to_sqlite_type(val) for val in data_row]
+            for col_name, col_type in zip(header_cols, col_types):
+                col_defs_list.append(f'"{self._escape_identifier(col_name)}" {col_type}')
+        return ", ".join(col_defs_list)
+
+    def _insert_rows(
+        self,
+        conn: sqlite3.Connection,
+        escaped_table_name: str,
+        header_cols: list[str],
+        first_data_row: list[Any],
+        rows: Iterator[list[Any]],
+    ) -> None:
+        """データを一括挿入します。"""
+        placeholders = ", ".join(["?"] * len(header_cols))
+        insert_sql = f'INSERT INTO "{escaped_table_name}" VALUES ({placeholders});'
+
+        batch = [self._serialize_row(first_data_row)]
+
+        for row in rows:
+            batch.append(self._serialize_row(row))
+            if len(batch) >= self.batch_size:
+                conn.executemany(insert_sql, batch)
+                batch.clear()
+
+        if batch:
+            conn.executemany(insert_sql, batch)
