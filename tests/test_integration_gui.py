@@ -580,24 +580,39 @@ def test_gui_column_detection(tk_root: tk.Tk, temp_settings_file: str) -> None:
             # 再度ファイルをセットして検証準備
             main_win.input_path_var.set(input_file_path)
             assert main_win.detected_columns == ["id", "name", "age"]
+            assert main_win.detected_types == {"id": "int", "name": "str", "age": "int"}
 
             # 2. 「追加 ➡️」ボタン/ダブルクリックとダイアログの連携検証
-            # リストボックスから 'name' (インデックス 1) を選択
+            # リストボックスから 'name' (インデックス 1, 推論型 'str') を選択
             main_win.cols_listbox.selection_clear(0, tk.END)
             main_win.cols_listbox.selection_set(1)
             assert main_win.cols_listbox.get(main_win.cols_listbox.curselection()[0]) == "name"
 
-            # _add_key_from_list を呼び出してダイアログを開く
             main_win._add_key_from_list()
 
-            # MainWindowの子供として Toplevel ウィジェットが生成されているか確認
             dialog = next((w for w in main_win.winfo_children() if isinstance(w, tk.Toplevel)), None)
             assert dialog is not None
             try:
-                # ダイアログ内の Combobox（カラム名選択）の値が "name" になっているか検証
                 combos = [w for w in dialog.winfo_children() if isinstance(w, ttk.Combobox)]
                 assert combos is not None
                 assert combos[0].get() == "name"
+                # 2つ目のCombobox（データ型）が自動的に "str" になっているか検証
+                assert combos[1].get() == "str"
+            finally:
+                dialog.destroy()
+
+            # リストボックスから 'id' (インデックス 0, 推論型 'int') を選択して検証
+            main_win.cols_listbox.selection_clear(0, tk.END)
+            main_win.cols_listbox.selection_set(0)
+            main_win._add_key_from_list()
+            dialog = next((w for w in main_win.winfo_children() if isinstance(w, tk.Toplevel)), None)
+            assert dialog is not None
+            try:
+                combos = [w for w in dialog.winfo_children() if isinstance(w, ttk.Combobox)]
+                assert combos is not None
+                assert combos[0].get() == "id"
+                # 2つ目のCombobox（データ型）が自動的に "int" になっているか検証
+                assert combos[1].get() == "int"
             finally:
                 dialog.destroy()
 

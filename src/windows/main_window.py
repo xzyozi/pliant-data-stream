@@ -82,6 +82,7 @@ class MainWindow(ttk.Frame):
 
         # 検出されたカラム
         self.detected_columns: list[str] = []
+        self.detected_types: dict[str, str] = {}
 
         # 入力パスやヘッダー扱いの変更時にカラム自動検出を実行するためのトレース設定
         self.input_path_var.trace_add("write", lambda *args: self._on_input_path_changed())
@@ -306,6 +307,7 @@ class MainWindow(ttk.Frame):
     def _detect_columns(self, input_path: str) -> None:
         """入力パスからカラム名を自動検出して self.detected_columns を更新します。"""
         self.detected_columns = []
+        self.detected_types = {}
         if not input_path:
             return
 
@@ -333,13 +335,80 @@ class MainWindow(ttk.Frame):
             with open(target_file, mode="r", encoding="utf-8", newline="") as f:
                 csv_reader = csv.reader(f, delimiter=delim)
                 first_row = next(csv_reader)
-
+                
+                # 型推論用の行データを収集
+                data_rows = []
+                for _ in range(50):
+                    try:
+                        row = next(csv_reader)
+                        if len(row) == len(first_row):
+                            data_rows.append(row)
+                    except StopIteration:
+                        break
+                
             if actual_has_header:
                 self.detected_columns = [col.strip() for col in first_row if col.strip()]
                 if not self.detected_columns:
                     self.detected_columns = [str(i) for i in range(len(first_row))]
             else:
                 self.detected_columns = [str(i) for i in range(len(first_row))]
+
+            # 型推論ヘルパー
+            def infer_col_type(values: list[str]) -> str:
+                types = []
+                for val in values:
+                    val = val.strip()
+                    if not val:
+                        continue
+                    try:
+                        int(val)
+                        types.append("int")
+                        continue
+                    except ValueError:
+                        pass
+                    try:
+                        float(val)
+                        types.append("float")
+                        continue
+                    except ValueError:
+                        pass
+                    datetime_parsed = False
+                    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d"):
+                        try:
+                            datetime.strptime(val, fmt)
+                            types.append("datetime")
+                            datetime_parsed = True
+                            break
+                        except ValueError:
+                            pass
+                    if datetime_parsed:
+                        continue
+                    try:
+                        datetime.fromisoformat(val)
+                        types.append("datetime")
+                        continue
+                    except ValueError:
+                        pass
+                    types.append("str")
+                
+                if not types:
+                    return "str"
+                unique_types = set(types)
+                if unique_types == {"int"}:
+                    return "int"
+                if unique_types == {"float"} or unique_types == {"int", "float"}:
+                    return "float"
+                if "datetime" in unique_types and unique_types.issubset({"datetime", "str"}):
+                    return "datetime"
+                return "str"
+
+            # 各カラムの型を推論して self.detected_types に格納
+            for idx, col_name in enumerate(self.detected_columns):
+                col_values = []
+                for row in data_rows:
+                    if idx < len(row):
+                        col_values.append(row[idx])
+                self.detected_types[col_name] = infer_col_type(col_values)
 
             if self.detected_columns:
                 self.detected_cols_label.configure(text=f"検出されたカラム: {', '.join(self.detected_columns)}")
@@ -352,6 +421,7 @@ class MainWindow(ttk.Frame):
                 self.cols_listbox.insert(tk.END, col)
 
             logger.info(f"カラム名を検出しました: {self.detected_columns}")
+            logger.info(f"カラムの推論型: {self.detected_types}")
         except Exception as e:
             logger.warning(f"カラム名の自動検出中にエラーが発生しました: {e}")
             self.detected_cols_label.configure(text="検出されたカラム: (なし)")
@@ -407,11 +477,26 @@ class MainWindow(ttk.Frame):
         entry.pack(pady=5)
 
         ttk.Label(dialog, text="データ型:").pack(pady=5)
-        type_var = tk.StringVar(value="str")
+        # データ型の初期値（選択されたカラムに対応する型）を設定
+        initial_type = "str"
+        if default_col and default_col in self.detected_types:
+            initial_type = self.detected_types[default_col]
+        elif self.detected_columns and self.detected_columns[0] in self.detected_types:
+            initial_type = self.detected_types[self.detected_columns[0]]
+
+        type_var = tk.StringVar(value=initial_type)
         type_combo = ttk.Combobox(
             dialog, textvariable=type_var, values=["str", "int", "float", "datetime"], state="readonly"
         )
         type_combo.pack(pady=5)
+
+        # カラム選択が変更された時に、対応する型へ自動変更するバインドを設定
+        def on_column_selected(event: Any) -> None:
+            selected_col = col_var.get().strip()
+            if selected_col in self.detected_types:
+                type_combo.set(self.detected_types[selected_col])
+
+        entry.bind("<<ComboboxSelected>>", on_column_selected)
 
         order_var = tk.StringVar(value="昇順")
         order_combo = ttk.Combobox(dialog, textvariable=order_var, values=["昇順", "降順"], state="readonly")
