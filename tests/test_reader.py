@@ -303,6 +303,7 @@ def test_csv_reader_invalid_encoding() -> None:
 
 def test_csv_reader_cast_failure() -> None:
     # 最初の行から col0 は int と推論されるが、3行目で "Invalid" という文字列が来てキャストに失敗する
+    # この場合、エラーで終了せず、元の "Invalid" (str) のまま読み込めることを検証
     content = "ID,Name\n1,Alice\n2,Bob\nInvalid,Charlie\n"
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8", newline="") as temp_file:
         temp_file.write(content)
@@ -310,8 +311,14 @@ def test_csv_reader_cast_failure() -> None:
 
     try:
         reader = CSVReader(has_header=True, auto_cast=True, infer_rows=2)
-        with pytest.raises(ValueError, match="型キャストエラーが発生しました"):
-            list(reader.read(temp_file_path))
+        rows = list(reader.read(temp_file_path))
+        
+        assert len(rows) == 3
+        # 1行目と2行目は int
+        assert rows[0] == [1, "Alice"]
+        assert rows[1] == [2, "Bob"]
+        # 3行目はキャスト失敗して "Invalid" のままフォールバック
+        assert rows[2] == ["Invalid", "Charlie"]
     finally:
         os.remove(temp_file_path)
 
@@ -371,7 +378,7 @@ def test_csv_reader_auto_detect_has_header() -> None:
 
 def test_csv_reader_cast_unexpected_exception() -> None:
     # _cast_row 内で ValueError 以外の例外（TypeErrorなど）が発生した際に、
-    # 適切に ValueError (型キャストエラー) に変換されるか検証
+    # 適切にフォールバックされるか検証
     from unittest.mock import patch
 
     def raise_type_error(x: str):
@@ -386,8 +393,9 @@ def test_csv_reader_cast_unexpected_exception() -> None:
 
         try:
             reader = CSVReader(has_header=True, auto_cast=True, infer_rows=1)
-            with pytest.raises(ValueError, match="型キャストエラーが発生しました"):
-                list(reader.read(temp_file_path))
+            rows = list(reader.read(temp_file_path))
+            assert len(rows) == 1
+            assert rows[0] == ["1", "Alice"]
         finally:
             os.remove(temp_file_path)
 

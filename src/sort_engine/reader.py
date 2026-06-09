@@ -2,11 +2,14 @@ from collections.abc import Callable, Iterator
 import csv
 from datetime import date, datetime
 import itertools
+import logging
 import os
 import random
 from typing import Any
 
 from .interface import ReaderProtocol
+
+logger = logging.getLogger(__name__)
 
 # 型定義
 CastType = int | float | datetime | date | str
@@ -372,11 +375,11 @@ class CSVReader(ReaderProtocol):
                 else:
                     casted_row.append(casters[col_idx](val))
             except (ValueError, TypeError, OverflowError, OSError) as e:
-                msg = (
-                    f"行 {line_idx} の列 {col_idx} で型キャストエラーが発生しました: "
-                    f"'{val}' を変換できません。詳細: {e}"
+                logger.warning(
+                    f"行 {line_idx} の列 {col_idx} で型キャストエラーが発生したため、"
+                    f"元の文字列 '{val}' を使用します。詳細: {e}"
                 )
-                raise ValueError(msg)
+                casted_row.append(val)
         return casted_row
 
     def read(self, file_path: str) -> Iterator[list[Any]]:
