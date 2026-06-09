@@ -361,6 +361,10 @@ class MainWindow(ttk.Frame):
         path = self.input_path_var.get().strip()
         if path and os.path.exists(path):
             self._detect_columns(path)
+        else:
+            self.detected_columns = []
+            self.detected_cols_label.configure(text="検出されたカラム: (なし)")
+            self.cols_listbox.delete(0, tk.END)
 
     def _on_sync_toggled(self) -> None:
         if self.auto_sync_path_var.get():

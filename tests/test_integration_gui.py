@@ -564,12 +564,58 @@ def test_gui_column_detection(tk_root: tk.Tk, temp_settings_file: str) -> None:
             assert "colA, colB" in main_win.detected_cols_label.cget("text")
             assert list(main_win.cols_listbox.get(0, tk.END)) == ["colA", "colB"]
 
-            # リストボックスから選択してソートキーに追加する機能のシミュレート
-            main_win.cols_listbox.selection_set(0) # 'colA'
-            # ダイアログ表示用のコールバック呼び出し
-            # テスト用フック：_add_key_from_list -> _add_key_dialog と連鎖するが、ダイアログを自動でsave()するのをモック等を使わず行うため、
-            # 直接 _add_key_dialog を呼び出しパラメータ付きでテストするか、_add_key_from_list の呼び出しテストを行う
-            assert main_win.cols_listbox.get(0) == "colA"
+            # 1. 異常系・クリア動作の検証
+            # 空文字列のパスが設定されたとき
+            main_win.input_path_var.set("")
+            assert main_win.detected_columns == []
+            assert "(なし)" in main_win.detected_cols_label.cget("text")
+            assert list(main_win.cols_listbox.get(0, tk.END)) == []
+
+            # 存在しないファイルパスが設定されたとき
+            main_win.input_path_var.set("C:/path/to/non_existent_file.csv")
+            assert main_win.detected_columns == []
+            assert "(なし)" in main_win.detected_cols_label.cget("text")
+            assert list(main_win.cols_listbox.get(0, tk.END)) == []
+
+            # 再度ファイルをセットして検証準備
+            main_win.input_path_var.set(input_file_path)
+            assert main_win.detected_columns == ["id", "name", "age"]
+
+            # 2. 「追加 ➡️」ボタン/ダブルクリックとダイアログの連携検証
+            # リストボックスから 'name' (インデックス 1) を選択
+            main_win.cols_listbox.selection_clear(0, tk.END)
+            main_win.cols_listbox.selection_set(1)
+            assert main_win.cols_listbox.get(main_win.cols_listbox.curselection()[0]) == "name"
+
+            # _add_key_from_list を呼び出してダイアログを開く
+            main_win._add_key_from_list()
+
+            # MainWindowの子供として Toplevel ウィジェットが生成されているか確認
+            dialog = next((w for w in main_win.winfo_children() if isinstance(w, tk.Toplevel)), None)
+            assert dialog is not None
+            try:
+                # ダイアログ内の Combobox（カラム名選択）の値が "name" になっているか検証
+                combos = [w for w in dialog.winfo_children() if isinstance(w, ttk.Combobox)]
+                assert combos is not None
+                assert combos[0].get() == "name"
+            finally:
+                dialog.destroy()
+
+            # 3. 空ヘッダーファイルのフォールバック検証
+            # 1行目がカンマのみのCSVファイルを作成
+            with tempfile.NamedTemporaryFile(suffix=".csv", mode="w", delete=False, newline="") as f_empty_header:
+                f_empty_header.write(",,\n")
+                f_empty_header_path = f_empty_header.name
+
+            try:
+                main_win.input_path_var.set(f_empty_header_path)
+                # ヘッダーとして意味のある文字列が無いので、列インデックス ["0", "1", "2"] にフォールバックする
+                assert main_win.detected_columns == ["0", "1", "2"]
+                assert "0, 1, 2" in main_win.detected_cols_label.cget("text")
+                assert list(main_win.cols_listbox.get(0, tk.END)) == ["0", "1", "2"]
+            finally:
+                if os.path.exists(f_empty_header_path):
+                    os.remove(f_empty_header_path)
 
         finally:
             if os.path.exists(input_file_path):
