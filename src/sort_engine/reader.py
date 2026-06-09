@@ -2,6 +2,8 @@ from collections.abc import Callable, Iterator
 import csv
 from datetime import date, datetime
 import itertools
+import os
+import random
 from typing import Any
 
 from .interface import ReaderProtocol
@@ -235,22 +237,53 @@ def _read_sniffer_sample(
 ) -> str:
     """Sniffer に渡すサンプルを「完全な行」単位で取得します。
 
-    ``f.read(N)`` では行の途中で切れてダブルクオート内改行を誤認識する可能性があるため、
-    ``readline()`` を使って完全な行のみを収集します。
+    デリミタ自動検出精度向上のため、1行目（ヘッダー候補）に加えて、
+    ファイル全体からランダムにサンプリングした行を結合して返します。
 
     Args:
         file_path: 対象ファイルのパス。
-        n_lines: 取得する行数。
+        n_lines: 取得する最大行数。
         on_warn: 警告メッセージを受け取るコールバック。省略時は無視します。
     """
     try:
-        with open(file_path, mode="r", encoding="utf-8", newline="") as f:
-            lines = [f.readline() for _ in range(n_lines)]
-        return "".join(lines)
-    except OSError as e:
+        file_size = os.path.getsize(file_path)
+        with open(file_path, mode="rb") as f:
+            first_line_bytes = f.readline()
+            if not first_line_bytes:
+                return ""
+            first_line = first_line_bytes.decode("utf-8", errors="ignore")
+
+            # ファイルが小さい場合は先頭から順番に読み込む
+            if file_size < 1024 * 50:  # 50KB未満
+                lines = [f.readline() for _ in range(n_lines - 1)]
+                sample_lines = [first_line] + [l.decode("utf-8", errors="ignore") for l in lines if l]
+                return "".join(sample_lines)
+
+            # 大きいファイルの場合はランダムシークでサンプリング
+            sample_lines = [first_line]
+            attempts = 0
+            while len(sample_lines) < n_lines and attempts < n_lines * 3:
+                attempts += 1
+                # 1行目の後ろからファイル末尾の手前までの範囲でランダムシーク
+                offset = random.randint(len(first_line_bytes), file_size - 100)
+                f.seek(offset)
+                f.readline()  # 途中の行を読み飛ばして次の行の開始位置へ
+                line_bytes = f.readline()
+                if line_bytes:
+                    line = line_bytes.decode("utf-8", errors="ignore")
+                    if line.strip():
+                        sample_lines.append(line)
+
+            return "".join(sample_lines)
+    except Exception as e:
         if on_warn is not None:
-            on_warn(f"サンプル取得に失敗しました: {e}")
-        return ""
+            on_warn(f"サンプルのサンプリング取得に失敗しました。先頭から読み込みます: {e}")
+        try:
+            with open(file_path, mode="r", encoding="utf-8", newline="") as f:
+                lines = [f.readline() for _ in range(n_lines)]
+            return "".join(lines)
+        except Exception:
+            return ""
 
 
 class CSVReader(ReaderProtocol):
