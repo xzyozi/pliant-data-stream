@@ -580,24 +580,39 @@ def test_gui_column_detection(tk_root: tk.Tk, temp_settings_file: str) -> None:
             # 再度ファイルをセットして検証準備
             main_win.input_path_var.set(input_file_path)
             assert main_win.detected_columns == ["id", "name", "age"]
+            assert main_win.detected_types == {"id": "int", "name": "str", "age": "int"}
 
             # 2. 「追加 ➡️」ボタン/ダブルクリックとダイアログの連携検証
-            # リストボックスから 'name' (インデックス 1) を選択
+            # リストボックスから 'name' (インデックス 1, 推論型 'str') を選択
             main_win.cols_listbox.selection_clear(0, tk.END)
             main_win.cols_listbox.selection_set(1)
             assert main_win.cols_listbox.get(main_win.cols_listbox.curselection()[0]) == "name"
 
-            # _add_key_from_list を呼び出してダイアログを開く
             main_win._add_key_from_list()
 
-            # MainWindowの子供として Toplevel ウィジェットが生成されているか確認
             dialog = next((w for w in main_win.winfo_children() if isinstance(w, tk.Toplevel)), None)
             assert dialog is not None
             try:
-                # ダイアログ内の Combobox（カラム名選択）の値が "name" になっているか検証
                 combos = [w for w in dialog.winfo_children() if isinstance(w, ttk.Combobox)]
                 assert combos is not None
                 assert combos[0].get() == "name"
+                # 2つ目のCombobox（データ型）が自動的に "str" になっているか検証
+                assert combos[1].get() == "str"
+            finally:
+                dialog.destroy()
+
+            # リストボックスから 'id' (インデックス 0, 推論型 'int') を選択して検証
+            main_win.cols_listbox.selection_clear(0, tk.END)
+            main_win.cols_listbox.selection_set(0)
+            main_win._add_key_from_list()
+            dialog = next((w for w in main_win.winfo_children() if isinstance(w, tk.Toplevel)), None)
+            assert dialog is not None
+            try:
+                combos = [w for w in dialog.winfo_children() if isinstance(w, ttk.Combobox)]
+                assert combos is not None
+                assert combos[0].get() == "id"
+                # 2つ目のCombobox（データ型）が自動的に "int" になっているか検証
+                assert combos[1].get() == "int"
             finally:
                 dialog.destroy()
 
@@ -620,6 +635,34 @@ def test_gui_column_detection(tk_root: tk.Tk, temp_settings_file: str) -> None:
         finally:
             if os.path.exists(input_file_path):
                 os.remove(input_file_path)
+
+
+def test_gui_infer_col_type_unexpected_exception(tk_root: tk.Tk, temp_settings_file: str) -> None:
+    """GUIの型推論処理において、例外が発生してもクラッシュせず "str" として正しく処理されることを検証。"""
+    from unittest.mock import patch
+    app = PliantApplication(tk_root)
+    app.settings_manager.settings_path = temp_settings_file
+    main_win = MainWindow(tk_root, app)
+
+    # 一時的なCSVファイル作成 (datetimeっぽい値を入れておく)
+    with tempfile.NamedTemporaryFile(suffix=".csv", mode="w", delete=False, newline="") as f_in:
+        writer = csv.writer(f_in)
+        writer.writerow(["id", "time"])
+        writer.writerow(["1", "2026-06-09T22:43:00"])
+        input_file_path = f_in.name
+
+    try:
+        # TypeInferrer.profile_value が例外を投げるようにモックする
+        with patch("windows.main_window.TypeInferrer.profile_value", side_effect=TypeError("Unexpected error")):
+            main_win.has_header_var.set(True)
+            main_win.input_path_var.set(input_file_path)
+
+            # エラーにより datetime として判定されず、かつクラッシュせずに "str" としてフォールバックされる
+            assert main_win.detected_columns == ["id", "time"]
+            assert main_win.detected_types["time"] == "str"
+    finally:
+        if os.path.exists(input_file_path):
+            os.remove(input_file_path)
 
 
 
