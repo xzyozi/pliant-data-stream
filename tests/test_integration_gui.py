@@ -435,3 +435,145 @@ def test_gui_sort_pipeline_sqlite(tk_root: tk.Tk, temp_settings_file: str) -> No
             os.remove(input_path)
         if os.path.exists(output_path):
             os.remove(output_path)
+
+
+def test_gui_auto_set_output_path(tk_root: tk.Tk) -> None:
+    """入力ファイル選択時の出力パス自動設定機能のテスト。"""
+    app = PliantApplication(tk_root)
+    main_win = MainWindow(tk_root, app)
+
+    # 1. CSV形式の場合の補完 (同期ON)
+    main_win.auto_sync_path_var.set(True)
+    main_win.output_format_var.set("CSV")
+    main_win._auto_set_output_path("C:/data/user_profile.csv")
+    assert main_win.output_path_var.get().replace("\\", "/") == "C:/data/user_profile_sorted.csv"
+
+    # 2. SQLite形式の場合の補完 (同期ON)
+    main_win.output_format_var.set("SQLite")
+    main_win._auto_set_output_path("C:/data/user_profile.csv")
+    assert main_win.output_path_var.get().replace("\\", "/") == "C:/data/user_profile_sorted.db"
+
+    # 3. 拡張子がない場合の補完
+    main_win.output_format_var.set("CSV")
+    main_win._auto_set_output_path("C:/data/raw_data")
+    assert main_win.output_path_var.get().replace("\\", "/") == "C:/data/raw_data_sorted.csv"
+
+    # 4. 同期がOFFの場合の補完なし
+    main_win.auto_sync_path_var.set(False)
+    main_win.output_path_var.set("C:/data/original.csv")
+    main_win._auto_set_output_path("C:/data/another.csv")
+    # 値が書き換わっていないこと
+    assert main_win.output_path_var.get().replace("\\", "/") == "C:/data/original.csv"
+
+
+def test_gui_sort_pipeline_dir(tk_root: tk.Tk, temp_settings_file: str) -> None:
+    """ディレクトリ一括ソート処理の結合テスト。"""
+    app = PliantApplication(tk_root)
+    app.settings_manager.settings_path = temp_settings_file
+
+    main_win = MainWindow(tk_root, app)
+
+    # 一時的な入力ディレクトリと複数のCSVファイルの作成
+    with tempfile.TemporaryDirectory() as in_dir, tempfile.TemporaryDirectory() as out_dir:
+        # ファイル1
+        file1 = os.path.join(in_dir, "data1.csv")
+        with open(file1, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["id", "score"])
+            writer.writerow(["1", "90"])
+            writer.writerow(["2", "80"])
+
+        # ファイル2
+        file2 = os.path.join(in_dir, "data2.csv")
+        with open(file2, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["id", "score"])
+            writer.writerow(["3", "70"])
+            writer.writerow(["4", "85"])
+
+        # GUI変数設定
+        main_win.input_path_var.set(in_dir)
+        main_win.output_path_var.set(out_dir)
+        main_win.has_header_var.set(True)
+        main_win.output_format_var.set("CSV")
+
+        # ソートキー設定 (scoreを数値で昇順)
+        main_win.keys_tree.insert("", tk.END, values=("score", "int", "昇順"))
+
+        # 実行
+        main_win._execute_sort(in_dir, out_dir)
+
+        # 結果確認
+        out_file1 = os.path.join(out_dir, "data1_sorted.csv")
+        out_file2 = os.path.join(out_dir, "data2_sorted.csv")
+
+        assert os.path.exists(out_file1)
+        assert os.path.exists(out_file2)
+
+        with open(out_file1, "r", encoding="utf-8") as f:
+            reader = list(csv.reader(f))
+            assert reader[1] == ["2", "80"]
+            assert reader[2] == ["1", "90"]
+
+        with open(out_file2, "r", encoding="utf-8") as f:
+            reader = list(csv.reader(f))
+            assert reader[1] == ["3", "70"]
+            assert reader[2] == ["4", "85"]
+
+
+def test_gui_column_detection(tk_root: tk.Tk, temp_settings_file: str) -> None:
+    """入力ファイル/フォルダ選択時やヘッダー設定変更時のカラム検出機能を検証する。"""
+    app = PliantApplication(tk_root)
+    app.settings_manager.settings_path = temp_settings_file
+    main_win = MainWindow(tk_root, app)
+
+    # 1. 一時的なCSVファイル作成
+    with tempfile.NamedTemporaryFile(suffix=".csv", mode="w", delete=False, newline="") as f_in:
+        writer = csv.writer(f_in)
+        writer.writerow(["id", "name", "age"])
+        writer.writerow(["1", "Alice", "20"])
+        input_file_path = f_in.name
+
+    # 2. 一時的なディレクトリとCSVファイル作成
+    with tempfile.TemporaryDirectory() as temp_dir:
+        dir_csv = os.path.join(temp_dir, "temp_data.csv")
+        with open(dir_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["colA", "colB"])
+            writer.writerow(["x", "y"])
+
+        try:
+            # ファイル単体で has_header=True の場合のカラム検出
+            main_win.has_header_var.set(True)
+            main_win.input_path_var.set(input_file_path)
+            # トレースで検出が走るはず
+            assert main_win.detected_columns == ["id", "name", "age"]
+            assert "id, name, age" in main_win.detected_cols_label.cget("text")
+            assert list(main_win.cols_listbox.get(0, tk.END)) == ["id", "name", "age"]
+
+            # has_header=False に切り替えた場合のカラム検出（インデックス表示）
+            main_win.has_header_var.set(False)
+            assert main_win.detected_columns == ["0", "1", "2"]
+            assert "0, 1, 2" in main_win.detected_cols_label.cget("text")
+            assert list(main_win.cols_listbox.get(0, tk.END)) == ["0", "1", "2"]
+
+            # ディレクトリを指定した場合のカラム検出（フォルダ内の最初のファイル colA, colB）
+            main_win.has_header_var.set(True)
+            main_win.input_path_var.set(temp_dir)
+            assert main_win.detected_columns == ["colA", "colB"]
+            assert "colA, colB" in main_win.detected_cols_label.cget("text")
+            assert list(main_win.cols_listbox.get(0, tk.END)) == ["colA", "colB"]
+
+            # リストボックスから選択してソートキーに追加する機能のシミュレート
+            main_win.cols_listbox.selection_set(0) # 'colA'
+            # ダイアログ表示用のコールバック呼び出し
+            # テスト用フック：_add_key_from_list -> _add_key_dialog と連鎖するが、ダイアログを自動でsave()するのをモック等を使わず行うため、
+            # 直接 _add_key_dialog を呼び出しパラメータ付きでテストするか、_add_key_from_list の呼び出しテストを行う
+            assert main_win.cols_listbox.get(0) == "colA"
+
+        finally:
+            if os.path.exists(input_file_path):
+                os.remove(input_file_path)
+
+
+
