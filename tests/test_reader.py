@@ -1,6 +1,7 @@
 import os
 import tempfile
 from datetime import date, datetime
+import csv
 import pytest
 from sort_engine import CSVReader
 from sort_engine.reader import TypeInferrer
@@ -55,6 +56,8 @@ def test_auto_cast_value_float() -> None:
 def test_auto_cast_value_datetime() -> None:
     assert isinstance(TypeInferrer.auto_cast_value("2026-06-07 12:00:00"), datetime)
     assert TypeInferrer.auto_cast_value("2026-06-07 15:30:00") == datetime(2026, 6, 7, 15, 30, 0)
+    # ISO 8601 フォーマットの検証を追加
+    assert TypeInferrer.auto_cast_value("2026-06-07T15:30:00") == datetime(2026, 6, 7, 15, 30, 0)
 
 
 def test_auto_cast_value_date() -> None:
@@ -410,3 +413,108 @@ def test_profile_value_unexpected_exception() -> None:
         # float が TypeError を投げてもクラッシュせず、str になるはず
         assert target_type is str
         assert format_str is None
+
+
+def test_csv_reader_large_file_random_seek() -> None:
+    """50KB以上のファイルでランダムシークによるサンプリングが正常に動作すること"""
+    # 50KBを超えるダミーデータを生成 (約60KB)
+    header = "ID,Value\n"
+    rows = [f"{i},DummyValue{i}\n" for i in range(5000)]
+    content = header + "".join(rows)
+    
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8", newline="") as temp_file:
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    try:
+        reader = CSVReader(auto_cast=True, infer_rows=10)
+        # 読み込み処理を実行（内部でランダムシークが走る）
+        result_rows = list(reader.read(temp_file_path))
+        
+        assert reader.header == ["ID", "Value"]
+        assert len(result_rows) == 5000
+        # 最初の行と最後の行が正しくキャストされているか確認
+        assert result_rows[0] == [0, "DummyValue0"]
+        assert result_rows[-1] == [4999, "DummyValue4999"]
+    finally:
+        os.remove(temp_file_path)
+
+
+def test_csv_reader_infer_schema_mixed_types_and_empty() -> None:
+    """
+    - intとfloatが混在する場合はfloatに昇格すること
+    - すべて空文字列の列はstrのままとなること
+    """
+    content = (
+        "ID,MixedNum,EmptyCol\n"
+        "1,100,\n"
+        "2,200.5,\n"
+        "3,300,  \n"
+    )
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8", newline="") as temp_file:
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    try:
+        reader = CSVReader(has_header=True, auto_cast=True, infer_rows=3)
+        rows = list(reader.read(temp_file_path))
+
+        assert len(rows) == 3
+        # ID列はint
+        assert isinstance(rows[0][0], int)
+        # MixedNum列はfloatに昇格していること
+        assert isinstance(rows[0][1], float)
+        assert rows[0][1] == 100.0
+        assert rows[1][1] == 200.5
+        # EmptyCol列はstrのまま（空白はトリミングされる）
+        assert rows[0][2] == ""
+        assert isinstance(rows[0][2], str)
+    finally:
+        os.remove(temp_file_path)
+
+
+def test_csv_reader_on_warn_callback() -> None:
+    """Snifferが判定できない曖昧なデータの場合に、on_warnが呼ばれること"""
+    from unittest.mock import patch
+    content = "ID,Name\n1,Alice\n"
+    
+    warn_messages = []
+    def mock_on_warn(msg: str) -> None:
+        warn_messages.append(msg)
+
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8", newline="") as temp_file:
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    try:
+        # Sniffer.sniff をモックして強制的に csv.Error を発生させる
+        with patch("csv.Sniffer.sniff", side_effect=csv.Error("Could not determine delimiter")):
+            reader = CSVReader(delimiter=None, auto_cast=False, on_warn=mock_on_warn)
+            list(reader.read(temp_file_path))
+
+        # csv.Sniffer が失敗し、警告メッセージが格納されているはず
+        assert len(warn_messages) > 0
+        assert any("デリミタの自動判定に失敗しました" in msg for msg in warn_messages)
+    finally:
+        os.remove(temp_file_path)
+
+
+def test_csv_reader_bom_handling() -> None:
+    """BOM付きUTF-8（BOM付きCSV）が正常にパースされ、先頭カラム名からBOMが除去されていること"""
+    # encoding="utf-8-sig" で書き込むことで、BOM付きファイルとする
+    content = "ID,Name\n1,Alice\n2,Bob\n"
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8-sig", newline="") as temp_file:
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    try:
+        reader = CSVReader(has_header=True, auto_cast=True, infer_rows=2)
+        rows = list(reader.read(temp_file_path))
+
+        # BOMが除去され、カラム名が正しく "ID" であること
+        assert reader.header == ["ID", "Name"]
+        assert len(rows) == 2
+        assert rows[0] == [1, "Alice"]
+        assert rows[1] == [2, "Bob"]
+    finally:
+        os.remove(temp_file_path)

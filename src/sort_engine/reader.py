@@ -256,7 +256,7 @@ def _read_sniffer_sample(
             first_line_bytes = f.readline()
             if not first_line_bytes:
                 return ""
-            first_line = first_line_bytes.decode("utf-8", errors="ignore")
+            first_line = first_line_bytes.decode("utf-8-sig", errors="ignore")
 
             # ファイルが小さい場合は先頭から順番に読み込む
             if file_size < 1024 * 50:  # 50KB未満
@@ -284,7 +284,7 @@ def _read_sniffer_sample(
         if on_warn is not None:
             on_warn(f"サンプルのサンプリング取得に失敗しました。先頭から読み込みます: {e}")
         try:
-            with open(file_path, mode="r", encoding="utf-8", newline="") as f:
+            with open(file_path, mode="r", encoding="utf-8-sig", newline="") as f:
                 lines = [f.readline() for _ in range(n_lines)]
             return "".join(lines)
         except Exception:
@@ -391,7 +391,7 @@ class CSVReader(ReaderProtocol):
         """
         delim, has_header = self._detect_properties(file_path)
 
-        with open(file_path, mode="r", encoding="utf-8", newline="") as f:
+        with open(file_path, mode="r", encoding="utf-8-sig", newline="") as f:
             reader = csv.reader(f, delimiter=delim)
 
             # 空ファイルチェック
