@@ -637,4 +637,32 @@ def test_gui_column_detection(tk_root: tk.Tk, temp_settings_file: str) -> None:
                 os.remove(input_file_path)
 
 
+def test_gui_infer_col_type_unexpected_exception(tk_root: tk.Tk, temp_settings_file: str) -> None:
+    """GUIの型推論処理において、例外が発生してもクラッシュせず "str" として正しく処理されることを検証。"""
+    from unittest.mock import patch
+    app = PliantApplication(tk_root)
+    app.settings_manager.settings_path = temp_settings_file
+    main_win = MainWindow(tk_root, app)
+
+    # 一時的なCSVファイル作成 (datetimeっぽい値を入れておく)
+    with tempfile.NamedTemporaryFile(suffix=".csv", mode="w", delete=False, newline="") as f_in:
+        writer = csv.writer(f_in)
+        writer.writerow(["id", "time"])
+        writer.writerow(["1", "2026-06-09T22:43:00"])
+        input_file_path = f_in.name
+
+    try:
+        # TypeInferrer.profile_value が例外を投げるようにモックする
+        with patch("windows.main_window.TypeInferrer.profile_value", side_effect=TypeError("Unexpected error")):
+            main_win.has_header_var.set(True)
+            main_win.input_path_var.set(input_file_path)
+
+            # エラーにより datetime として判定されず、かつクラッシュせずに "str" としてフォールバックされる
+            assert main_win.detected_columns == ["id", "time"]
+            assert main_win.detected_types["time"] == "str"
+    finally:
+        if os.path.exists(input_file_path):
+            os.remove(input_file_path)
+
+
 

@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from core.bootstrap.base_application import BaseApplication
 from sort_engine.engine import SortEngine
-from sort_engine.reader import CSVReader
+from sort_engine.reader import CSVReader, TypeInferrer
 from sort_engine.sorter import ExternalMergeSorter, SafeComparableKey
 from sort_engine.writer import CSVWriter, SQLiteWriter
 
@@ -361,35 +361,18 @@ class MainWindow(ttk.Frame):
                     if not val:
                         continue
                     try:
-                        int(val)
-                        types.append("int")
-                        continue
-                    except ValueError:
-                        pass
-                    try:
-                        float(val)
-                        types.append("float")
-                        continue
-                    except ValueError:
-                        pass
-                    datetime_parsed = False
-                    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d"):
-                        try:
-                            datetime.strptime(val, fmt)
+                        # タイムスタンプ判定も有効化して推論の一貫性を高める
+                        target_type, _ = TypeInferrer.profile_value(val, enable_timestamp_cast=True)
+                        if target_type is int:
+                            types.append("int")
+                        elif target_type is float:
+                            types.append("float")
+                        elif target_type in (datetime, date):
                             types.append("datetime")
-                            datetime_parsed = True
-                            break
-                        except ValueError:
-                            pass
-                    if datetime_parsed:
-                        continue
-                    try:
-                        datetime.fromisoformat(val)
-                        types.append("datetime")
-                        continue
-                    except ValueError:
-                        pass
-                    types.append("str")
+                        else:
+                            types.append("str")
+                    except Exception:
+                        types.append("str")
                 
                 if not types:
                     return "str"

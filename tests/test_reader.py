@@ -2,70 +2,71 @@ import os
 import tempfile
 from datetime import date, datetime
 import pytest
-from sort_engine import CSVReader, auto_cast_value
+from sort_engine import CSVReader
+from sort_engine.reader import TypeInferrer
 
 
 # ---------------------------------------------------------------------------
-# auto_cast_value のユニットテスト
+# TypeInferrer.auto_cast_value のユニットテスト
 # ---------------------------------------------------------------------------
 
 
 def test_auto_cast_value_timestamp_enabled() -> None:
     """enable_timestamp_cast=True の場合、10桁/13桁数値をdatetimeに変換する"""
     # 秒ベース (10桁)
-    assert isinstance(auto_cast_value("1717751200", enable_timestamp_cast=True), datetime)
-    assert auto_cast_value("1717751200", enable_timestamp_cast=True) == datetime.fromtimestamp(1717751200)
+    assert isinstance(TypeInferrer.auto_cast_value("1717751200", enable_timestamp_cast=True), datetime)
+    assert TypeInferrer.auto_cast_value("1717751200", enable_timestamp_cast=True) == datetime.fromtimestamp(1717751200)
     # ミリ秒ベース (13桁)
-    assert isinstance(auto_cast_value("1717751200000", enable_timestamp_cast=True), datetime)
-    assert auto_cast_value("1717751200000", enable_timestamp_cast=True) == datetime.fromtimestamp(1717751200)
+    assert isinstance(TypeInferrer.auto_cast_value("1717751200000", enable_timestamp_cast=True), datetime)
+    assert TypeInferrer.auto_cast_value("1717751200000", enable_timestamp_cast=True) == datetime.fromtimestamp(1717751200)
     # 小数点付き秒ベース
-    assert isinstance(auto_cast_value("1717751200.5", enable_timestamp_cast=True), datetime)
-    assert auto_cast_value("1717751200.5", enable_timestamp_cast=True) == datetime.fromtimestamp(1717751200.5)
+    assert isinstance(TypeInferrer.auto_cast_value("1717751200.5", enable_timestamp_cast=True), datetime)
+    assert TypeInferrer.auto_cast_value("1717751200.5", enable_timestamp_cast=True) == datetime.fromtimestamp(1717751200.5)
 
 
 def test_auto_cast_value_timestamp_disabled() -> None:
     """enable_timestamp_cast=False を明示した場合、10桁数値は int/float に留まる"""
     # 10桁の数値はタイムスタンプではなくintとして返る
-    result = auto_cast_value("1717751200", enable_timestamp_cast=False)
+    result = TypeInferrer.auto_cast_value("1717751200", enable_timestamp_cast=False)
     assert isinstance(result, int)
     assert result == 1717751200
 
     # 13桁の数値もintとして返る
-    result_ms = auto_cast_value("1717751200000", enable_timestamp_cast=False)
+    result_ms = TypeInferrer.auto_cast_value("1717751200000", enable_timestamp_cast=False)
     assert isinstance(result_ms, int)
     assert result_ms == 1717751200000
 
     # 小数点付きはfloat
-    result_float = auto_cast_value("1717751200.5", enable_timestamp_cast=False)
+    result_float = TypeInferrer.auto_cast_value("1717751200.5", enable_timestamp_cast=False)
     assert isinstance(result_float, float)
     assert result_float == 1717751200.5
 
 
 def test_auto_cast_value_int() -> None:
-    assert auto_cast_value("123") == 123
-    assert auto_cast_value("-456") == -456
+    assert TypeInferrer.auto_cast_value("123") == 123
+    assert TypeInferrer.auto_cast_value("-456") == -456
 
 
 def test_auto_cast_value_float() -> None:
-    assert auto_cast_value("12.34") == 12.34
-    assert auto_cast_value("-0.001") == -0.001
+    assert TypeInferrer.auto_cast_value("12.34") == 12.34
+    assert TypeInferrer.auto_cast_value("-0.001") == -0.001
 
 
 def test_auto_cast_value_datetime() -> None:
-    assert isinstance(auto_cast_value("2026-06-07 12:00:00"), datetime)
-    assert auto_cast_value("2026-06-07 15:30:00") == datetime(2026, 6, 7, 15, 30, 0)
+    assert isinstance(TypeInferrer.auto_cast_value("2026-06-07 12:00:00"), datetime)
+    assert TypeInferrer.auto_cast_value("2026-06-07 15:30:00") == datetime(2026, 6, 7, 15, 30, 0)
 
 
 def test_auto_cast_value_date() -> None:
-    assert isinstance(auto_cast_value("2026-06-07"), date)
-    assert auto_cast_value("2026-06-07") == date(2026, 6, 7)
-    assert auto_cast_value("2026/06/07") == date(2026, 6, 7)
+    assert isinstance(TypeInferrer.auto_cast_value("2026-06-07"), date)
+    assert TypeInferrer.auto_cast_value("2026-06-07") == date(2026, 6, 7)
+    assert TypeInferrer.auto_cast_value("2026/06/07") == date(2026, 6, 7)
 
 
 def test_auto_cast_value_str_fallback() -> None:
-    assert auto_cast_value("Hello") == "Hello"
-    assert auto_cast_value("  ") == ""  # 空文字列（トリミング適用）
-    assert auto_cast_value("") == ""
+    assert TypeInferrer.auto_cast_value("Hello") == "Hello"
+    assert TypeInferrer.auto_cast_value("  ") == ""  # 空文字列（トリミング適用）
+    assert TypeInferrer.auto_cast_value("") == ""
 
 
 # ---------------------------------------------------------------------------
@@ -361,3 +362,43 @@ def test_csv_reader_auto_detect_has_header() -> None:
         assert rows[1] == [2, 88.0, date(2026, 6, 2)]
     finally:
         os.remove(temp_file_path_h)
+
+
+# ---------------------------------------------------------------------------
+# 例外・補強テスト
+# ---------------------------------------------------------------------------
+
+
+def test_csv_reader_cast_unexpected_exception() -> None:
+    # _cast_row 内で ValueError 以外の例外（TypeErrorなど）が発生した際に、
+    # 適切に ValueError (型キャストエラー) に変換されるか検証
+    from unittest.mock import patch
+
+    def raise_type_error(x: str):
+        raise TypeError("Unexpected type error")
+
+    # キャスターをモックしてTypeErrorを投げさせる
+    with patch("sort_engine.reader.TypeInferrer.make_caster", return_value=raise_type_error):
+        content = "ID,Name\n1,Alice\n"
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8", newline="") as temp_file:
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+
+        try:
+            reader = CSVReader(has_header=True, auto_cast=True, infer_rows=1)
+            with pytest.raises(ValueError, match="型キャストエラーが発生しました"):
+                list(reader.read(temp_file_path))
+        finally:
+            os.remove(temp_file_path)
+
+
+def test_profile_value_unexpected_exception() -> None:
+    # profile_value 内で例外が発生しても str としてフォールバックされるか検証
+    from unittest.mock import patch
+
+    # float が例外を投げるようにモックする
+    with patch("sort_engine.reader.float", side_effect=TypeError("Mock type error")):
+        target_type, format_str = TypeInferrer.profile_value("123.4", enable_timestamp_cast=True)
+        # float が TypeError を投げてもクラッシュせず、str になるはず
+        assert target_type is str
+        assert format_str is None
